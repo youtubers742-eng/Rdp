@@ -54,16 +54,27 @@ jobs:
           Write-Host "Remote Desktop enabled."
 
       # ----------------------------------------------------
-      # 2. Create RDP user + password
+      # 2. Create RDP user + strong password
       # ----------------------------------------------------
       - name: Create RDP user
         shell: pwsh
         run: |
           $p = "${{ inputs.rdp_password }}"
-          if ([string]::IsNullOrWhiteSpace($p)) {
-            $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789@#%&'
-            $p = -join (1..14 | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
+          if ([string]::IsNullOrWhiteSpace($p) -or $p.Length -lt 8) {
+            $U = 'ABCDEFGHJKLMNPQRSTUVWXYZ'.ToCharArray()
+            $L = 'abcdefghijkmnpqrstuvwxyz'.ToCharArray()
+            $N = '23456789'.ToCharArray()
+            $S = '@#%&*!'.ToCharArray()
+            $A = $U + $L + $N + $S
+            $parts = @()
+            $parts += ($U | Get-Random)
+            $parts += ($L | Get-Random)
+            $parts += ($N | Get-Random)
+            $parts += ($S | Get-Random)
+            $parts += (1..10 | ForEach-Object { $A | Get-Random })
+            $p = -join ($parts | Sort-Object { Get-Random })
           }
+          if ([string]::IsNullOrWhiteSpace($p) -or $p.Length -lt 8) { $p = 'Cloud@PC2026x' }
           $secure = ConvertTo-SecureString $p -AsPlainText -Force
           if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) {
             Set-LocalUser -Name "RDP" -Password $secure
@@ -130,7 +141,7 @@ jobs:
             Write-Host "Tailscale connected. IP: $ip"
           } else {
             Write-Host "No Tailscale IP yet."
-            Write-Host "key mode: your auth key is invalid, expired or single use."
+            Write-Host "key mode: auth key is invalid, expired or single use."
             Write-Host "Fix: generate a NEW key with Reusable enabled and update the secret."
             Write-Host "Or: re-run this workflow with auth_mode = link."
           }

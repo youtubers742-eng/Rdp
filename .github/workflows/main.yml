@@ -1,127 +1,69 @@
-
-# ============================================================
-name: Free Windows PC (Tailscale RDP)
-
+name: Free Windows PC
 on:
   workflow_dispatch:
-    inputs:
-      rdp_password:
-        description: "RDP password (khali chhod do to khud ban jayega)"
-        required: false
-        default: ""
-      download_url:
-        description: "OPTIONAL: kisi bhi file ka direct link (jaise OmniRush installer) — Desktop par auto-download"
-        required: false
-        default: ""
-
 jobs:
   cloud-pc:
     runs-on: windows-latest
-    timeout-minutes: 355          # 5 ghante 55 min, phir khud band (safe side)
-
+    timeout-minutes: 355
     steps:
-      # ---------- 1. RDP ON karo (NLA ke saath = secure) ----------
-      - name: Enable Remote Desktop (NLA ON)
+      - name: Enable RDP
         shell: pwsh
         run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-                           -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                           -Name "UserAuthentication" -Value 1 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                           -Name "SecurityLayer" -Value 1 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 1 -Force
           netsh advfirewall firewall delete rule name="RDP-Tailscale" | Out-Null
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
-          Write-Host "RDP enabled with NLA."
 
-      # ---------- 2. User + Password banao ----------
-      - name: Create RDP user
+      - name: Create user
         shell: pwsh
         run: |
-          $p = "${{ inputs.rdp_password }}"
-          if ([string]::IsNullOrWhiteSpace($p)) {
-            $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789@#%&'
-            $p = -join (1..14 | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
-          }
-          $secure = ConvertTo-SecureString $p -AsPlainText -Force
-          if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) {
-            Set-LocalUser -Name "RDP" -Password $secure
-          } else {
-            New-LocalUser -Name "RDP" -Password $secure -AccountNeverExpires | Out-Null
-          }
+          $chars='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789@#%&'
+          $p=-join (1..14 | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
+          $s=ConvertTo-SecureString $p -AsPlainText -Force
+          if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) { Set-LocalUser -Name "RDP" -Password $s }
+          else { New-LocalUser -Name "RDP" -Password $s -AccountNeverExpires | Out-Null }
           Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
           "RDP_PASS=$p" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "User ready."
 
-      # ---------- 3. Tailscale install ----------
       - name: Install Tailscale
         shell: pwsh
         run: |
-          $msi = "$env:TEMP\tailscale.msi"
-          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile $msi
-          Start-Process msiexec.exe -ArgumentList "/i", $msi, "/quiet", "/norestart" -Wait
-          Remove-Item $msi -Force
-          Write-Host "Tailscale installed."
+          $m="$env:TEMP\ts.msi"
+          Invoke-WebRequest "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile $m
+          Start-Process msiexec.exe -ArgumentList "/i",$m,"/quiet","/norestart" -Wait
+          Remove-Item $m -Force
 
-      # ---------- 4. Tailscale connect ----------
-      - name: Connect Tailscale
+      - name: LOGIN LINK YAHAN
         shell: pwsh
         run: |
-          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
-          & $ts up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-pc-$env:GITHUB_RUN_ID
-          $ip = $null
-          for ($i = 0; $i -lt 20 -and -not $ip; $i++) {
-            Start-Sleep -Seconds 5
-            $ip = & $ts ip -4
-          }
-          if (-not $ip) { Write-Error "Tailscale IP nahi mila."; exit 1 }
-          "TS_IP=$ip" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "Tailscale IP: $ip"
+          $ts="$env:ProgramFiles\Tailscale\tailscale.exe"
+          $o="$env:TEMP\o.txt"; $e="$env:TEMP\e.txt"
+          Remove-Item $o,$e -ErrorAction SilentlyContinue
+          Start-Process -FilePath $ts -ArgumentList "up","--hostname=gh-pc-$env:GITHUB_RUN_ID" -RedirectStandardOutput $o -RedirectStandardError $e -WindowStyle Hidden
+          Start-Sleep -Seconds 18
+          $log=@(); if(Test-Path $o){$log+=Get-Content $o}; if(Test-Path $e){$log+=Get-Content $e}
+          $log | ForEach-Object { Write-Host $_ }
+          $m2=$log | Select-String 'https://login\.tailscale\.com/\S+' | Select-Object -First 1
+          if($m2){ Write-Host "###### LOGIN LINK: $($m2.Matches[0].Value) ######" }
+          for($i=0;$i -lt 20;$i++){ Start-Sleep -Seconds 15; $ip=& $ts ip -4 2>$null | Select-String '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | Select-Object -First 1; if($ip){ Write-Host "READY IP: $ip"; break } }
 
-      # ---------- 5. Chrome install (optional, fail ho to bhi chalta rahe) ----------
-      - name: Install Chrome
+      - name: OmniRush auto download
         shell: pwsh
         continue-on-error: true
         run: |
-          winget install -e --id Google.Chrome --silent --accept-package-agreements --accept-source-agreements
+          Invoke-WebRequest "https://github.com/omnirush-ai/omnirush-gui/releases/latest/download/omnirush-win-x64-2.2.17.exe" -OutFile "$env:USERPROFILE\Desktop\OmniRush.exe"
+          Write-Host "OmniRush Desktop par ready hai"
 
-      # ---------- 6. OPTIONAL: apni file auto-download (OmniRush wagara) ----------
-      - name: Download your file to Desktop
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $url = "${{ inputs.download_url }}"
-          if ([string]::IsNullOrWhiteSpace($url)) { Write-Host "Koi link nahi diya — skip."; exit 0 }
-          $out = "$env:USERPROFILE\Desktop\" + [System.IO.Path]::GetFileName($url.Split('?')[0])
-          if ($out -notmatch '\.[a-zA-Z0-9]+$') { $out = "$env:USERPROFILE\Desktop\myfile.exe" }
-          Invoke-WebRequest -Uri $url -OutFile $out
-          Write-Host "Downloaded to Desktop: $out"
-
-      # ---------- 7. Details dikhao ----------
-      - name: SHOW CONNECTION DETAILS
+      - name: KEEP ALIVE - IP YAHAN
         shell: pwsh
         run: |
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "   PC READY — ABHI CONNECT KAR"
-          Write-Host "=========================================="
-          Write-Host "  Address  : $env:TS_IP"
-          Write-Host "  Username : RDP"
-          Write-Host "  Password : $env:RDP_PASS"
-          Write-Host "=========================================="
-          Write-Host "  Windows App khol -> PC name me Address paste kar"
-          Write-Host ""
-
-      # ---------- 8. PC ko zinda rakho ----------
-      - name: Keep PC alive
-        shell: pwsh
-        run: |
-          $end = (Get-Date).AddMinutes(350)
-          while ((Get-Date) -lt $end) {
-            Write-Host "[$(Get-Date -Format 'HH:mm')] PC chal raha hai... ($env:TS_IP)"
-            Start-Sleep -Seconds 300
+          $ts="$env:ProgramFiles\Tailscale\tailscale.exe"
+          $end=(Get-Date).AddMinutes(348)
+          while((Get-Date) -lt $end){
+            $ip=& $ts ip -4 2>$null | Select-String '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | Select-Object -First 1
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ADDRESS: $ip | USER: RDP | PASSWORD: $env:RDP_PASS"
+            Start-Sleep -Seconds 30
           }
-          Write-Host "Session khatam. Naya PC chahiye to dobara Run workflow daba."
-          

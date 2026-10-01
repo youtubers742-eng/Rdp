@@ -1,37 +1,55 @@
 # ============================================================
-#  Free Windows Cloud PC — GitHub Actions + Tailscale
-#  OS      : Windows Server 2022 (GitHub-hosted runner)
-#  RAM     : 16 GB (public repository)
-#  Session : up to 6 hours (GitHub limit)
-#  Auth    : key  = reusable Tailscale auth key (secret)
-#            link = interactive Tailscale login URL in log
-#  Extra   : OmniRush auto download + silent install
+#  FREE WINDOWS CLOUD PC — FIXED VERSION (Tailscale key bug gone)
 # ============================================================
-name: Free Windows PC
+#  Ye version 3 cheezein theek karta hai:
+#   1. Key GALAT ho toh 24 second barbaad nahi karta -> TURANT bata deta hai
+#   2. Key fail ho toh APNI AAP "link mode" pe chala jata hai
+#   3. Tailscale bilkul na chale toh RUSTDESK fallback (no login, no key!)
+#
+#  SECRET: TAILSCALE_AUTH_KEY  ->  sirf "tskey-auth-..." wali key
+#          (tskey-api-... NAHI chalegi — wo API token hai, auth key nahi)
+# ============================================================
+name: Free Windows PC FIXED
 
 on:
   workflow_dispatch:
     inputs:
       auth_mode:
-        description: 'key = use TAILSCALE_AUTH_KEY secret, link = interactive login URL'
+        description: 'auto = key try karo, fail ho toh link dikhao  |  key  |  link'
         required: true
-        default: 'key'
+        default: 'auto'
         type: choice
         options:
+          - auto
           - key
           - link
-      rdp_password:
-        description: 'RDP password (leave blank for auto generated)'
-        required: false
-        default: ''
-      install_omnirush:
-        description: 'Download and install OmniRush automatically'
+      rustdesk_fallback:
+        description: 'Tailscale fail ho toh RustDesk bhi install karu? (koi login nahi, ID+password se chalega)'
         required: true
         default: 'yes'
         type: choice
         options:
           - 'yes'
           - 'no'
+      rdp_password:
+        description: 'RDP password (khali chhod -> khud ban jayega)'
+        required: false
+        default: ''
+      file_url:
+        description: 'OPTIONAL: koi file direct link se Desktop pe download karne ke liye'
+        required: false
+        default: ''
+      hours:
+        description: 'Kitne ghante chalu rakhe (max 5.5)'
+        required: true
+        default: '5'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - '5'
 
 jobs:
   cloud-pc:
@@ -40,27 +58,26 @@ jobs:
 
     steps:
       # ----------------------------------------------------
-      # 1. Enable Remote Desktop (NLA on)
+      # 1. Remote Desktop ON
       # ----------------------------------------------------
       - name: Enable Remote Desktop
         shell: pwsh
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 1 -Force
           netsh advfirewall firewall delete rule name="RDP-Tailscale" | Out-Null
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
-          Write-Host "Remote Desktop enabled."
+          Write-Host "Remote Desktop ON."
 
       # ----------------------------------------------------
-      # 2. Create RDP user + strong password
+      # 2. RDP user + strong password
       # ----------------------------------------------------
       - name: Create RDP user
         shell: pwsh
         run: |
-          $p = "${{ inputs.rdp_password }}"
-          if ([string]::IsNullOrWhiteSpace($p) -or $p.Length -lt 8) {
+          $p = "${{ inputs.rdp_password }}".Trim()
+          if ($p.Length -lt 10) {
             $U = 'ABCDEFGHJKLMNPQRSTUVWXYZ'.ToCharArray()
             $L = 'abcdefghijkmnpqrstuvwxyz'.ToCharArray()
             $N = '23456789'.ToCharArray()
@@ -74,7 +91,6 @@ jobs:
             $parts += (1..10 | ForEach-Object { $A | Get-Random })
             $p = -join ($parts | Sort-Object { Get-Random })
           }
-          if ([string]::IsNullOrWhiteSpace($p) -or $p.Length -lt 8) { $p = 'Cloud@PC2026x' }
           $secure = ConvertTo-SecureString $p -AsPlainText -Force
           if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) {
             Set-LocalUser -Name "RDP" -Password $secure
@@ -83,11 +99,12 @@ jobs:
           }
           Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
-          "RDP_PASS=$p" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "RDP_USER=RDP" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "RDP_PASS=$p"  | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "RDP user ready."
 
       # ----------------------------------------------------
-      # 3. Install Tailscale
+      # 3. Tailscale install
       # ----------------------------------------------------
       - name: Install Tailscale
         shell: pwsh
@@ -95,99 +112,238 @@ jobs:
           $msi = "$env:TEMP\tailscale.msi"
           Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile $msi
           Start-Process msiexec.exe -ArgumentList "/i", $msi, "/quiet", "/norestart" -Wait
-          Remove-Item $msi -Force
+          Remove-Item $msi -Force -ErrorAction SilentlyContinue
           Write-Host "Tailscale installed."
 
       # ----------------------------------------------------
-      # 4. Connect Tailscale
+      # 4. KEY CHECK — sabse important step
+      #    Galat key ho toh yahin pakad leta hai, 24 sec barbaad nahi
       # ----------------------------------------------------
-      - name: Connect Tailscale
+      - name: Validate Tailscale key
+        shell: pwsh
+        run: |
+          $k = "${{ secrets.TAILSCALE_AUTH_KEY }}".Trim()
+          $mode = "${{ inputs.auth_mode }}"
+
+          Write-Host "=========================================="
+          Write-Host "  TAILSCALE KEY CHECK"
+          Write-Host "=========================================="
+
+          if ([string]::IsNullOrWhiteSpace($k)) {
+            Write-Host "  [!] TAILSCALE_AUTH_KEY secret KHALI hai."
+            "TS_MODE=link" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          }
+          elseif ($k -notmatch '^tskey-auth-') {
+            Write-Host "  [!] GALAT KEY TYPE!"
+            Write-Host "  Tu ne 'tskey-api-...' (API access token) dala hai."
+            Write-Host "  Chahiye: 'tskey-auth-...' (AUTH KEY)."
+            Write-Host "  Dono ek hi page pe bante hain — Keys page ka pehla tab."
+            "TS_MODE=link" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          }
+          elseif ($k.Length -lt 30) {
+            Write-Host "  [!] Key adhura copy hua hai (length $($k.Length))."
+            "TS_MODE=link" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          }
+          elseif ($mode -eq "link") {
+            "TS_MODE=link" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          }
+          else {
+            Write-Host "  [OK] Key format sahi hai (tskey-auth-...)."
+            "TS_MODE=key" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          }
+          Write-Host "=========================================="
+
+      # ----------------------------------------------------
+      # 5. Connect — KEY mode
+      # ----------------------------------------------------
+      - name: Connect Tailscale (key)
+        if: env.TS_MODE == 'key'
         shell: pwsh
         run: |
           $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
-          $mode = "${{ inputs.auth_mode }}"
+          $k  = "${{ secrets.TAILSCALE_AUTH_KEY }}".Trim()
           $pcName = "gh-pc-$env:GITHUB_RUN_ID"
-          $authKey = "${{ secrets.TAILSCALE_AUTH_KEY }}"
-
-          if ($mode -eq "link") {
-            $out = "$env:TEMP\ts.out"
-            $err = "$env:TEMP\ts.err"
-            Remove-Item $out, $err -ErrorAction SilentlyContinue
-            Start-Process -FilePath $ts -ArgumentList "up", "--hostname=$pcName" -RedirectStandardOutput $out -RedirectStandardError $err -WindowStyle Hidden
-            Start-Sleep -Seconds 20
-            $log = @()
-            if (Test-Path $out) { $log += Get-Content $out }
-            if (Test-Path $err) { $log += Get-Content $err }
-            $log | ForEach-Object { Write-Host $_ }
-            $m = $log | Select-String -Pattern 'https://login\.tailscale\.com/\S+' | Select-Object -First 1
-            if ($m) {
-              Write-Host "=========================================="
-              Write-Host "  TAILSCALE LOGIN LINK"
-              Write-Host "  $($m.Matches[0].Value)"
-              Write-Host "  Open this link and sign in."
-              Write-Host "=========================================="
-            }
+          Write-Host "Trying auth key on hostname $pcName ..."
+          & $ts "up" "--authkey=$k" "--hostname=$pcName" 2>&1 | Out-Host
+          Start-Sleep -Seconds 12
+          $st = & $ts "status" 2>&1 | Out-String
+          if ($st -match 'NeedsLogin|invalid key|Logged out') {
+            Write-Host "  [FAIL] Key kaam nahi kiya -> link mode pe jaa raha hoon."
+            "TS_NEED_LINK=true" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           } else {
-            & $ts "up" "--authkey=$authKey" "--hostname=$pcName"
+            Write-Host "  [OK] Tailscale connected with key."
+            "TS_NEED_LINK=false" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           }
 
+      # ----------------------------------------------------
+      # 6. Connect — LINK mode (koi key nahi chahiye!)
+      #    Ye tujhe ek login link dega, uspe tap karke Google se login
+      # ----------------------------------------------------
+      - name: Connect Tailscale (login link)
+        if: env.TS_MODE == 'link' || env.TS_NEED_LINK == 'true'
+        shell: pwsh
+        run: |
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          $pcName = "gh-pc-$env:GITHUB_RUN_ID"
+          $out = "$env:TEMP\ts_out.txt"
+          $err = "$env:TEMP\ts_err.txt"
+          Remove-Item $out,$err -ErrorAction SilentlyContinue
+
+          Start-Process -FilePath $ts -ArgumentList "up","--hostname=$pcName" `
+            -RedirectStandardOutput $out -RedirectStandardError $err -WindowStyle Hidden -PassThru | Out-Null
+
+          $link = $null
+          for ($i=0; $i -lt 12; $i++) {
+            Start-Sleep -Seconds 5
+            $log = ""
+            if (Test-Path $out) { $log += (Get-Content $out -Raw -ErrorAction SilentlyContinue) }
+            if (Test-Path $err) { $log += (Get-Content $err -Raw -ErrorAction SilentlyContinue) }
+            $m = [regex]::Match($log, 'https://login\.tailscale\.com/\S+')
+            if ($m.Success) { $link = $m.Value.Trim(); break }
+          }
+
+          if ($link) {
+            Write-Host "=================================================="
+            Write-Host "  TAILSCALE LOGIN LINK  (5 minute mein expire)"
+            Write-Host ""
+            Write-Host "  $link"
+            Write-Host ""
+            Write-Host "  Is link ko phone ke CHROME mein khol."
+            Write-Host "  (Lemur Browser mat kholna — Google usme login block karta hai)"
+            Write-Host "  Google se sign in kar. Bas, ho gaya."
+            Write-Host "=================================================="
+          } else {
+            Write-Host "  [X] Link nahi mila. Neeche RustDesk use kar."
+          }
+
+      # ----------------------------------------------------
+      # 7. Tailscale IP nikaal
+      # ----------------------------------------------------
+      - name: Get Tailscale IP
+        shell: pwsh
+        run: |
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
           $ip = $null
-          for ($i = 0; $i -lt 20; $i++) {
-            Start-Sleep -Seconds 15
-            $ip = & $ts "ip" "-4" 2>$null | Select-String -Pattern '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | Select-Object -First 1
+          for ($i=0; $i -lt 12; $i++) {
+            Start-Sleep -Seconds 10
+            $ip = (& $ts "ip" "-4" 2>$null | Select-String -Pattern '^100\.' | Select-Object -First 1)
             if ($ip) { break }
           }
           if ($ip) {
-            Write-Host "Tailscale connected. IP: $ip"
+            "TS_IP=$ip" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "Tailscale IP: $ip"
           } else {
-            Write-Host "No Tailscale IP yet."
-            Write-Host "key mode: auth key is invalid, expired or single use."
-            Write-Host "Fix: generate a NEW key with Reusable enabled and update the secret."
-            Write-Host "Or: re-run this workflow with auth_mode = link."
+            Write-Host "Tailscale IP nahi mila (abhi tak login nahi hua?)."
           }
 
       # ----------------------------------------------------
-      # 5. OmniRush download + silent install
+      # 8. RUSTDESK FALLBACK — koi key nahi, koi login nahi!
+      #    Phone me RustDesk app (Play Store) -> ID + password
       # ----------------------------------------------------
-      - name: Install OmniRush
+      - name: RustDesk fallback (no login needed)
+        if: inputs.rustdesk_fallback == 'yes'
         shell: pwsh
-        continue-on-error: true
         run: |
-          if ("${{ inputs.install_omnirush }}" -ne "yes") { Write-Host "Skipped."; exit 0 }
-          $url = "https://github.com/omnirush-ai/omnirush-gui/releases/latest/download/omnirush-win-x64-2.2.17.exe"
-          $exe = "$env:USERPROFILE\Desktop\OmniRush.exe"
-          Invoke-WebRequest -Uri $url -OutFile $exe
-          Write-Host "OmniRush downloaded to Desktop."
-          Start-Process -FilePath $exe -ArgumentList "/S" -Wait
-          Write-Host "OmniRush installed."
-          $target = "$env:LOCALAPPDATA\Programs\omnirush\OmniRush.exe"
-          if (-not (Test-Path $target)) {
-            $found = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Filter "OmniRush.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($found) { $target = $found.FullName }
+          Write-Host "Installing RustDesk..."
+          $rd = "$env:TEMP\rustdesk.exe"
+          try {
+            Invoke-WebRequest -Uri "https://github.com/rustdesk/rustdesk/releases/download/1.3.9/rustdesk-1.3.9-x86_64.exe" -OutFile $rd -UseBasicParsing
+          } catch {
+            try { Invoke-WebRequest -Uri "https://github.com/rustdesk/rustdesk/releases/latest/download/rustdesk-1.3.9-x86_64.exe" -OutFile $rd -UseBasicParsing } catch {}
           }
-          if (Test-Path $target) {
-            $w = New-Object -ComObject WScript.Shell
-            $s = $w.CreateShortcut("$env:USERPROFILE\Desktop\OmniRush.lnk")
-            $s.TargetPath = $target
-            $s.Save()
-            Write-Host "OmniRush desktop shortcut created."
+          if (Test-Path $rd) {
+            Start-Process $rd -ArgumentList "--silent-install" -Wait -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 15
+          }
+
+          $exe = @(
+            "$env:ProgramFiles\RustDesk\rustdesk.exe",
+            "${env:ProgramFiles(x86)}\RustDesk\rustdesk.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+          if ($exe) {
+            $rdp = "$env:RDP_PASS"
+            & $exe "--password" "$rdp" 2>&1 | Out-Host
+            Start-Sleep -Seconds 8
+            $id = (& $exe "--get-id" 2>$null | Select-String -Pattern '\d{9,}' | Select-Object -First 1)
+            if (-not $id) {
+              $cfg = "$env:APPDATA\RustDesk\config\RustDesk.toml"
+              if (Test-Path $cfg) {
+                $m = [regex]::Match((Get-Content $cfg -Raw), 'id\s*=\s*''(\d+)''')
+                if ($m.Success) { $id = $m.Groups[1].Value }
+              }
+            }
+            if ($id) {
+              "RD_ID=$id" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+              Write-Host "RustDesk ID: $id"
+            }
+          } else {
+            Write-Host "RustDesk install nahi hua (chhod do, RDP use karo)."
           }
 
       # ----------------------------------------------------
-      # 6. Keep alive + print connection info
+      # 9. Desktop pe README + OmniRush
+      # ----------------------------------------------------
+      - name: Download your file to Desktop
+        shell: pwsh
+        run: |
+          $url = "${{ inputs.file_url }}"
+          if ($url -and $url.StartsWith("http")) {
+            try {
+              $dest = "$env:USERPROFILE\Desktop\" + [System.IO.Path]::GetFileName($url)
+              Invoke-WebRequest -Uri $url -OutFile $dest
+              Write-Host "Downloaded: $dest"
+            } catch { Write-Host "Download fail: $_" }
+          }
+
+      # ----------------------------------------------------
+      # 10. CONNECTION DETAILS — yahan se copy kar
+      # ----------------------------------------------------
+      - name: SHOW CONNECTION DETAILS
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "=========================================================="
+          Write-Host "   TERRA PC TAIYAAR HAI"
+          Write-Host "=========================================================="
+          Write-Host ""
+          Write-Host "   USER     : RDP"
+          Write-Host "   PASSWORD : $env:RDP_PASS"
+          Write-Host ""
+          if ($env:TS_IP) {
+            Write-Host "   ---- TARIKA 1: Tailscale RDP ----"
+            Write-Host "   ADDRESS  : $($env:TS_IP):3389"
+            Write-Host "   (phone me Tailscale app ON + RD Client app)"
+            Write-Host ""
+          }
+          if ($env:RD_ID) {
+            Write-Host "   ---- TARIKA 2: RustDesk (sabse aasan) ----"
+            Write-Host "   ID       : $env:RD_ID"
+            Write-Host "   PASSWORD : $env:RDP_PASS"
+            Write-Host "   (Play Store se RustDesk app, koi login nahi)"
+            Write-Host ""
+          }
+          Write-Host "=========================================================="
+          Write-Host ""
+
+      # ----------------------------------------------------
+      # 11. Keep alive
       # ----------------------------------------------------
       - name: Keep PC alive
         shell: pwsh
         run: |
-          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
-          $pass = $env:RDP_PASS
-          $end = (Get-Date).AddMinutes(348)
-          Write-Host "=========================================="
-          Write-Host "  WINDOWS CLOUD PC READY"
-          Write-Host "=========================================="
-          while ((Get-Date) -lt $end) {
-            $ip = & $ts "ip" "-4" 2>$null | Select-String -Pattern '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | Select-Object -First 1
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ADDRESS: $ip | USER: RDP | PASSWORD: $pass"
-            Start-Sleep -Seconds 30
+          $hours  = [int]"${{ inputs.hours }}"
+          $endAt  = (Get-Date).AddHours($hours)
+          $ts     = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          Write-Host "PC chalega $hours ghante, tab tak: $endAt"
+          $n = 0
+          while ((Get-Date) -lt $endAt) {
+            Start-Sleep -Seconds 60
+            $n++
+            if ($n % 5 -eq 0) {
+              $ip = (& $ts "ip" "-4" 2>$null | Select-String -Pattern '^100\.' | Select-Object -First 1)
+              Write-Host "[alive $(Get-Date -Format HH:mm)] Tailscale IP: $ip | RustDesk ID: $env:RD_ID | pass: $env:RDP_PASS"
+            }
           }
-          Write-Host "Session finished. Run the workflow again for a new PC."
+          Write-Host "Time khatam. Band ho raha hai."
+          

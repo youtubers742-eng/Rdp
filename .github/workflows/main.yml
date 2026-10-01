@@ -4,12 +4,12 @@
 #  Ye version 3 cheezein theek karta hai:
 #   1. Key GALAT ho toh 24 second barbaad nahi karta -> TURANT bata deta hai
 #   2. Key fail ho toh APNI AAP "link mode" pe chala jata hai
-#   3. Tailscale bilkul na chale toh RUSTDESK fallback (no login, no key!)
+#   3. OmniRush khud download + silent install hota hai Desktop pe
 #
 #  SECRET: TAILSCALE_AUTH_KEY  ->  sirf "tskey-auth-..." wali key
 #          (tskey-api-... NAHI chalegi — wo API token hai, auth key nahi)
 # ============================================================
-name: Free Windows PC FIXED
+name: Free Windows PC OMNIRUSH
 
 on:
   workflow_dispatch:
@@ -23,8 +23,8 @@ on:
           - auto
           - key
           - link
-      rustdesk_fallback:
-        description: 'Tailscale fail ho toh RustDesk bhi install karu? (koi login nahi, ID+password se chalega)'
+      install_omnirush:
+        description: 'OmniRush khud download + silent install karu? (Desktop pe ready milega)'
         required: true
         default: 'yes'
         type: choice
@@ -213,7 +213,7 @@ jobs:
             Write-Host "  Google se sign in kar. Bas, ho gaya."
             Write-Host "=================================================="
           } else {
-            Write-Host "  [X] Link nahi mila. Neeche RustDesk use kar."
+            Write-Host "  [X] Link nahi mila. Key dobara check kar (tskey-auth- wali, Reusable ON)."
           }
 
       # ----------------------------------------------------
@@ -237,52 +237,35 @@ jobs:
           }
 
       # ----------------------------------------------------
-      # 8. RUSTDESK FALLBACK — koi key nahi, koi login nahi!
-      #    Phone me RustDesk app (Play Store) -> ID + password
+      # 8. OmniRush download + silent install
       # ----------------------------------------------------
-      - name: RustDesk fallback (no login needed)
-        if: inputs.rustdesk_fallback == 'yes'
+      - name: Install OmniRush
+        if: inputs.install_omnirush == 'yes'
         shell: pwsh
+        continue-on-error: true
         run: |
-          Write-Host "Installing RustDesk..."
-          $rd = "$env:TEMP\rustdesk.exe"
-          try {
-            Invoke-WebRequest -Uri "https://github.com/rustdesk/rustdesk/releases/download/1.3.9/rustdesk-1.3.9-x86_64.exe" -OutFile $rd -UseBasicParsing
-          } catch {
-            try { Invoke-WebRequest -Uri "https://github.com/rustdesk/rustdesk/releases/latest/download/rustdesk-1.3.9-x86_64.exe" -OutFile $rd -UseBasicParsing } catch {}
+          $url = "https://github.com/omnirush-ai/omnirush-gui/releases/latest/download/omnirush-win-x64-2.2.17.exe"
+          $exe = "$env:USERPROFILE\Desktop\OmniRush.exe"
+          Write-Host "Downloading OmniRush..."
+          Invoke-WebRequest -Uri $url -OutFile $exe
+          Write-Host "OmniRush Desktop par download ho gaya."
+          Start-Process -FilePath $exe -ArgumentList "/S" -Wait
+          Write-Host "OmniRush installed."
+          $target = "$env:LOCALAPPDATA\Programs\omnirush\OmniRush.exe"
+          if (-not (Test-Path $target)) {
+            $found = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Filter "OmniRush.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $target = $found.FullName }
           }
-          if (Test-Path $rd) {
-            Start-Process $rd -ArgumentList "--silent-install" -Wait -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 15
-          }
-
-          $exe = @(
-            "$env:ProgramFiles\RustDesk\rustdesk.exe",
-            "${env:ProgramFiles(x86)}\RustDesk\rustdesk.exe"
-          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-
-          if ($exe) {
-            $rdp = "$env:RDP_PASS"
-            & $exe "--password" "$rdp" 2>&1 | Out-Host
-            Start-Sleep -Seconds 8
-            $id = (& $exe "--get-id" 2>$null | Select-String -Pattern '\d{9,}' | Select-Object -First 1)
-            if (-not $id) {
-              $cfg = "$env:APPDATA\RustDesk\config\RustDesk.toml"
-              if (Test-Path $cfg) {
-                $m = [regex]::Match((Get-Content $cfg -Raw), 'id\s*=\s*''(\d+)''')
-                if ($m.Success) { $id = $m.Groups[1].Value }
-              }
-            }
-            if ($id) {
-              "RD_ID=$id" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-              Write-Host "RustDesk ID: $id"
-            }
-          } else {
-            Write-Host "RustDesk install nahi hua (chhod do, RDP use karo)."
+          if (Test-Path $target) {
+            $w = New-Object -ComObject WScript.Shell
+            $s = $w.CreateShortcut("$env:USERPROFILE\Desktop\OmniRush.lnk")
+            $s.TargetPath = $target
+            $s.Save()
+            Write-Host "OmniRush desktop shortcut ready."
           }
 
       # ----------------------------------------------------
-      # 9. Desktop pe README + OmniRush
+      # 9. OPTIONAL: apni koi file Desktop pe
       # ----------------------------------------------------
       - name: Download your file to Desktop
         shell: pwsh
@@ -316,13 +299,7 @@ jobs:
             Write-Host "   (phone me Tailscale app ON + RD Client app)"
             Write-Host ""
           }
-          if ($env:RD_ID) {
-            Write-Host "   ---- TARIKA 2: RustDesk (sabse aasan) ----"
-            Write-Host "   ID       : $env:RD_ID"
-            Write-Host "   PASSWORD : $env:RDP_PASS"
-            Write-Host "   (Play Store se RustDesk app, koi login nahi)"
-            Write-Host ""
-          }
+          Write-Host "   Desktop pe OmniRush ready hai (agar yes kiya tha)."
           Write-Host "=========================================================="
           Write-Host ""
 
@@ -342,7 +319,7 @@ jobs:
             $n++
             if ($n % 5 -eq 0) {
               $ip = (& $ts "ip" "-4" 2>$null | Select-String -Pattern '^100\.' | Select-Object -First 1)
-              Write-Host "[alive $(Get-Date -Format HH:mm)] Tailscale IP: $ip | RustDesk ID: $env:RD_ID | pass: $env:RDP_PASS"
+              Write-Host "[alive $(Get-Date -Format HH:mm)] Tailscale IP: $ip | user: RDP | pass: $env:RDP_PASS"
             }
           }
           Write-Host "Time khatam. Band ho raha hai."

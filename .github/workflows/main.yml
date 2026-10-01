@@ -1,11 +1,11 @@
 # ============================================================
 #  Free Windows Cloud PC — GitHub Actions + Tailscale
-#  OS        : Windows Server 2022 (GitHub-hosted runner)
-#  RAM       : 16 GB  (public repository)
-#  Session   : up to 6 hours (GitHub limit)
-#  Auth      : "key"  = Tailscale auth key from repository secret
-#              "link" = interactive Tailscale login link in the log
-#  Extras    : OmniRush downloaded (and installed) automatically
+#  OS      : Windows Server 2022 (GitHub-hosted runner)
+#  RAM     : 16 GB (public repository)
+#  Session : up to 6 hours (GitHub limit)
+#  Auth    : key  = reusable Tailscale auth key (secret)
+#            link = interactive Tailscale login URL in log
+#  Extra   : OmniRush auto download + silent install
 # ============================================================
 name: Free Windows PC
 
@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       auth_mode:
-        description: 'Auth method: key = secret TAILSCALE_AUTH_KEY, link = interactive login URL'
+        description: 'key = use TAILSCALE_AUTH_KEY secret, link = interactive login URL'
         required: true
         default: 'key'
         type: choice
@@ -21,11 +21,11 @@ on:
           - key
           - link
       rdp_password:
-        description: 'RDP password (leave blank to auto-generate a strong one)'
+        description: 'RDP password (leave blank for auto generated)'
         required: false
         default: ''
       install_omnirush:
-        description: 'Download and silently install OmniRush on the desktop'
+        description: 'Download and install OmniRush automatically'
         required: true
         default: 'yes'
         type: choice
@@ -40,24 +40,21 @@ jobs:
 
     steps:
       # ----------------------------------------------------
-      # 1. Enable Remote Desktop with NLA (secure)
+      # 1. Enable Remote Desktop (NLA on)
       # ----------------------------------------------------
-      - name: Enable Remote Desktop (NLA ON)
+      - name: Enable Remote Desktop
         shell: pwsh
         run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-                           -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                           -Name "UserAuthentication" -Value 1 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                           -Name "SecurityLayer" -Value 1 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 1 -Force
           netsh advfirewall firewall delete rule name="RDP-Tailscale" | Out-Null
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
-          Write-Host "Remote Desktop enabled with NLA."
+          Write-Host "Remote Desktop enabled."
 
       # ----------------------------------------------------
-      # 2. Create the RDP user and password
+      # 2. Create RDP user + password
       # ----------------------------------------------------
       - name: Create RDP user
         shell: pwsh
@@ -91,22 +88,21 @@ jobs:
           Write-Host "Tailscale installed."
 
       # ----------------------------------------------------
-      # 4. Connect Tailscale (key mode or interactive link)
+      # 4. Connect Tailscale
       # ----------------------------------------------------
       - name: Connect Tailscale
         shell: pwsh
         run: |
-          $ts   = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
           $mode = "${{ inputs.auth_mode }}"
-          $host = "gh-pc-$env:GITHUB_RUN_ID"
+          $pcName = "gh-pc-$env:GITHUB_RUN_ID"
+          $authKey = "${{ secrets.TAILSCALE_AUTH_KEY }}"
 
           if ($mode -eq "link") {
-            # Interactive mode: print a login URL, user clicks and signs in
             $out = "$env:TEMP\ts.out"
             $err = "$env:TEMP\ts.err"
             Remove-Item $out, $err -ErrorAction SilentlyContinue
-            Start-Process -FilePath $ts -ArgumentList "up","--hostname=$host" `
-                          -RedirectStandardOutput $out -RedirectStandardError $err -WindowStyle Hidden
+            Start-Process -FilePath $ts -ArgumentList "up", "--hostname=$pcName" -RedirectStandardOutput $out -RedirectStandardError $err -WindowStyle Hidden
             Start-Sleep -Seconds 20
             $log = @()
             if (Test-Path $out) { $log += Get-Content $out }
@@ -114,37 +110,33 @@ jobs:
             $log | ForEach-Object { Write-Host $_ }
             $m = $log | Select-String -Pattern 'https://login\.tailscale\.com/\S+' | Select-Object -First 1
             if ($m) {
-              Write-Host ""
               Write-Host "=========================================="
               Write-Host "  TAILSCALE LOGIN LINK"
               Write-Host "  $($m.Matches[0].Value)"
               Write-Host "  Open this link and sign in."
               Write-Host "=========================================="
-              Write-Host ""
             }
           } else {
-            # Key mode: use the reusable auth key stored as a secret
-            & $ts up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=$host
+            & $ts "up" "--authkey=$authKey" "--hostname=$pcName"
           }
 
-          # Wait for the Tailscale IP address (up to 5 minutes)
           $ip = $null
           for ($i = 0; $i -lt 20; $i++) {
             Start-Sleep -Seconds 15
-            $ip = & $ts ip -4 2>$null | Select-String -Pattern '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | Select-Object -First 1
+            $ip = & $ts "ip" "-4" 2>$null | Select-String -Pattern '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | Select-Object -First 1
             if ($ip) { break }
           }
           if ($ip) {
             Write-Host "Tailscale connected. IP: $ip"
           } else {
             Write-Host "No Tailscale IP yet."
-            Write-Host "If you used 'key' mode: your auth key is invalid, expired or single-use."
-            Write-Host "Fix: create a NEW key with 'Reusable' enabled, update the secret, then re-run."
-            Write-Host "Or: re-run this workflow with auth_mode = link and sign in manually."
+            Write-Host "key mode: your auth key is invalid, expired or single use."
+            Write-Host "Fix: generate a NEW key with Reusable enabled and update the secret."
+            Write-Host "Or: re-run this workflow with auth_mode = link."
           }
 
       # ----------------------------------------------------
-      # 5. OmniRush (download + silent install)
+      # 5. OmniRush download + silent install
       # ----------------------------------------------------
       - name: Install OmniRush
         shell: pwsh
@@ -156,8 +148,7 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile $exe
           Write-Host "OmniRush downloaded to Desktop."
           Start-Process -FilePath $exe -ArgumentList "/S" -Wait
-          Write-Host "OmniRush installation finished."
-          $shortcut = "$env:USERPROFILE\Desktop\OmniRush.lnk"
+          Write-Host "OmniRush installed."
           $target = "$env:LOCALAPPDATA\Programs\omnirush\OmniRush.exe"
           if (-not (Test-Path $target)) {
             $found = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Filter "OmniRush.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -165,28 +156,26 @@ jobs:
           }
           if (Test-Path $target) {
             $w = New-Object -ComObject WScript.Shell
-            $s = $w.CreateShortcut($shortcut)
+            $s = $w.CreateShortcut("$env:USERPROFILE\Desktop\OmniRush.lnk")
             $s.TargetPath = $target
             $s.Save()
             Write-Host "OmniRush desktop shortcut created."
           }
 
       # ----------------------------------------------------
-      # 6. Keep the machine alive and print connection info
+      # 6. Keep alive + print connection info
       # ----------------------------------------------------
-      - name: Keep PC alive (connection info every 30s)
+      - name: Keep PC alive
         shell: pwsh
         run: |
-          $ts   = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
           $pass = $env:RDP_PASS
-          $end  = (Get-Date).AddMinutes(348)
-          Write-Host ""
+          $end = (Get-Date).AddMinutes(348)
           Write-Host "=========================================="
           Write-Host "  WINDOWS CLOUD PC READY"
           Write-Host "=========================================="
-          Write-Host ""
           while ((Get-Date) -lt $end) {
-            $ip = & $ts ip -4 2>$null | Select-String -Pattern '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | Select-Object -First 1
+            $ip = & $ts "ip" "-4" 2>$null | Select-String -Pattern '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | Select-Object -First 1
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ADDRESS: $ip | USER: RDP | PASSWORD: $pass"
             Start-Sleep -Seconds 30
           }

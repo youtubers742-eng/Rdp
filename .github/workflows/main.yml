@@ -1,48 +1,42 @@
 # ============================================================
-#  FREE WINDOWS CLOUD PC — FIXED VERSION (Tailscale key bug gone)
+#  OMNIRUSH PC — WINDOWS + LINUX (ek hi file, jab chaho switch)
 # ============================================================
-#  Ye version 3 cheezein theek karta hai:
-#   1. Key GALAT ho toh 24 second barbaad nahi karta -> TURANT bata deta hai
-#   2. Key fail ho toh APNI AAP "link mode" pe chala jata hai
-#   3. OmniRush khud download + silent install hota hai Desktop pe
+#  SABSE UPAR "os" choose karo:  windows  ya  linux
+#  Baaki sab options waise hi hain (time, OmniRush, Tailscale)
 #
-#  SECRET: TAILSCALE_AUTH_KEY  ->  sirf "tskey-auth-..." wali key
-#          (tskey-api-... NAHI chalegi — wo API token hai, auth key nahi)
+#  WINDOWS  = asli desktop PC (RDP se phone se chalao) + OmniRush GUI
+#  LINUX    = fast CLI agent + browser mein Linux desktop (noVNC)
+#
+#  SECRETS:
+#    TAILSCALE_AUTH_KEY  tskey-auth-... (Reusable ON) — sirf Tailscale ke liye
+#    OMNIRUSH_AUTH       login ke baad milta hai (dobara login na pade)
 # ============================================================
-name: Free Windows PC OMNIRUSH
+name: OmniRush PC
 
 on:
   workflow_dispatch:
     inputs:
-      auth_mode:
-        description: 'auto = key try karo, fail ho toh link dikhao  |  key  |  link'
+      os:
+        description: '⭐ Kaunsa OS chahiye?'
         required: true
-        default: 'auto'
+        default: 'windows'
         type: choice
         options:
-          - auto
-          - key
-          - link
-      install_omnirush:
-        description: 'OmniRush khud download + silent install karu? (Desktop pe ready milega)'
+          - windows
+          - linux
+      mode:
+        description: 'task = kaam karwao | login = pehli baar | pc = desktop chalu rakho'
         required: true
-        default: 'yes'
+        default: 'task'
         type: choice
         options:
-          - 'yes'
-          - 'no'
-      rdp_password:
-        description: 'RDP password (khali chhod -> khud ban jayega)'
-        required: false
-        default: ''
-      file_url:
-        description: 'OPTIONAL: koi file direct link se Desktop pe download karne ke liye'
-        required: false
-        default: ''
+          - task
+          - login
+          - pc
       hours:
-        description: 'Kitne ghante chalu rakhe (max 5.5)'
+        description: 'Kitni der chalu rakhe?'
         required: true
-        default: '5'
+        default: '2'
         type: choice
         options:
           - '1'
@@ -50,17 +44,159 @@ on:
           - '3'
           - '4'
           - '5'
+      install_omnirush:
+        description: 'OmniRush install karu?'
+        required: true
+        default: 'yes'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+      tailscale:
+        description: 'Tailscale ON karu? (Windows RDP / Linux desktop ke liye)'
+        required: true
+        default: 'yes'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+      task:
+        description: 'Kya karana hai? (task mode mein)'
+        required: false
+        default: 'ek simple calculator app bana ke do'
 
 jobs:
-  cloud-pc:
-    runs-on: windows-latest
+  pc:
+    runs-on: ${{ inputs.os == 'linux' && 'ubuntu-latest' || 'windows-latest' }}
     timeout-minutes: 355
 
     steps:
-      # ----------------------------------------------------
-      # 1. Remote Desktop ON
-      # ----------------------------------------------------
-      - name: Enable Remote Desktop
+      # ============================================================
+      #  COMMON
+      # ============================================================
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Banner
+        shell: bash
+        run: |
+          echo "=================================================="
+          echo "  OMNIRUSH PC"
+          echo "  OS   : ${{ inputs.os }}"
+          echo "  MODE : ${{ inputs.mode }}"
+          echo "  TIME : ${{ inputs.hours }} ghante"
+          echo "=================================================="
+
+      # ============================================================
+      #  ###################  L I N U X  ###################
+      # ============================================================
+      - name: "[Linux] Session restore"
+        if: inputs.os == 'linux'
+        shell: bash
+        env:
+          OMNIRUSH_AUTH: ${{ secrets.OMNIRUSH_AUTH }}
+        run: |
+          mkdir -p "$HOME/.omnirush"
+          if [ -n "$OMNIRUSH_AUTH" ]; then
+            echo "$OMNIRUSH_AUTH" | base64 -d > "$HOME/.omnirush/auth.json" 2>/dev/null || true
+            [ -s "$HOME/.omnirush/auth.json" ] && echo "[OK] Purani session mili." || rm -f "$HOME/.omnirush/auth.json"
+          else
+            echo "[!] OMNIRUSH_AUTH nahi hai — 'login' mode chalao."
+          fi
+
+      - name: "[Linux] Install OmniRush CLI"
+        if: inputs.os == 'linux' && inputs.install_omnirush == 'yes'
+        shell: bash
+        run: |
+          npm install -g omnirush@latest
+          omnirush --version || true
+
+      - name: "[Linux] Tailscale"
+        if: inputs.os == 'linux' && inputs.tailscale == 'yes'
+        shell: bash
+        env:
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          if [ -z "$TAILSCALE_AUTH_KEY" ]; then echo "[!] Key nahi hai, skip."; exit 0; fi
+          curl -fsSL https://tailscale.com/install.sh | sh
+          sudo tailscale up --authkey="$TAILSCALE_AUTH_KEY" --hostname="or-linux-$GITHUB_RUN_ID" --accept-routes
+          sleep 8
+          echo "LINUX_TS_IP=$(tailscale ip -4 | head -1)" >> $GITHUB_ENV
+
+      - name: "[Linux] Desktop in browser (noVNC)"
+        if: inputs.os == 'linux' && inputs.mode == 'pc'
+        shell: bash
+        continue-on-error: true
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb x11vnc novnc websockify fluxbox xterm
+          Xvfb :99 -screen 0 1366x768x24 >/dev/null 2>&1 &
+          sleep 3
+          DISPLAY=:99 fluxbox >/dev/null 2>&1 &
+          sleep 2
+          x11vnc -display :99 -forever -shared -nopw -rfbport 5900 >/dev/null 2>&1 &
+          sleep 2
+          websockify --web=/usr/share/novnc/ 6080 localhost:5900 >/dev/null 2>&1 &
+          sleep 3
+          echo "[OK] Linux desktop chalu :99 (noVNC port 6080)"
+
+      - name: "[Linux] Login"
+        if: inputs.os == 'linux' && inputs.mode == 'login'
+        shell: bash
+        run: |
+          echo "=================================================="
+          echo "  NEECHE EK LINK AAYEGA — phone ke Chrome mein"
+          echo "  khol ke approve kar de"
+          echo "=================================================="
+          timeout 480 omnirush login 2>&1 | tee /tmp/login.log || true
+          echo "=================================================="
+          if [ -f "$HOME/.omnirush/auth.json" ]; then
+            echo "[OK] LOGIN HO GAYA"
+            echo "----- OMNIRUSH_AUTH (copy kar) -----"
+            base64 -w0 "$HOME/.omnirush/auth.json"
+            echo ""
+            echo "----- copy khatam -----"
+          else
+            echo "[X] Login nahi hua:"; tail -30 /tmp/login.log
+          fi
+
+      - name: "[Linux] Run task"
+        if: inputs.os == 'linux' && inputs.mode == 'task'
+        shell: bash
+        run: |
+          if [ ! -f "$HOME/.omnirush/auth.json" ]; then
+            echo "[X] Login nahi hai — pehle mode=login chalao."; exit 1
+          fi
+          echo "TASK: ${{ inputs.task }}"
+          omnirush -p "${{ inputs.task }}" 2>&1 | tee omnirush-output.txt
+
+      - name: "[Linux] Keep alive"
+        if: inputs.os == 'linux' && inputs.mode == 'pc'
+        shell: bash
+        run: |
+          echo "PC ${{ inputs.hours }} ghante chalu rahega."
+          echo "Tailscale IP: ${{ env.LINUX_TS_IP }}"
+          echo "Desktop (agar Tailscale ON hai): http://<tailscale-ip>:6080/vnc.html"
+          end=$(( $(date +%s) + ${{ inputs.hours }} * 3600 ))
+          n=0
+          while [ "$(date +%s)" -lt "$end" ]; do
+            sleep 60; n=$((n+1))
+            if [ $((n % 5)) -eq 0 ]; then
+              echo "[alive $(date +%H:%M)] IP: $(tailscale ip -4 2>/dev/null | head -1)"
+            fi
+          done
+          echo "Time khatam."
+
+      # ============================================================
+      #  ##############  W I N D O W S  ##############
+      # ============================================================
+      - name: "[Win] Enable Remote Desktop"
+        if: inputs.os == 'windows' && inputs.mode == 'pc'
         shell: pwsh
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
@@ -70,257 +206,127 @@ jobs:
           Restart-Service -Name TermService -Force
           Write-Host "Remote Desktop ON."
 
-      # ----------------------------------------------------
-      # 2. RDP user + strong password
-      # ----------------------------------------------------
-      - name: Create RDP user
+      - name: "[Win] Create RDP user"
+        if: inputs.os == 'windows' && inputs.mode == 'pc'
         shell: pwsh
         run: |
-          $p = "${{ inputs.rdp_password }}".Trim()
-          if ($p.Length -lt 10) {
-            $U = 'ABCDEFGHJKLMNPQRSTUVWXYZ'.ToCharArray()
-            $L = 'abcdefghijkmnpqrstuvwxyz'.ToCharArray()
-            $N = '23456789'.ToCharArray()
-            $S = '@#%&*!'.ToCharArray()
-            $A = $U + $L + $N + $S
-            $parts = @()
-            $parts += ($U | Get-Random)
-            $parts += ($L | Get-Random)
-            $parts += ($N | Get-Random)
-            $parts += ($S | Get-Random)
-            $parts += (1..10 | ForEach-Object { $A | Get-Random })
-            $p = -join ($parts | Sort-Object { Get-Random })
-          }
-          $secure = ConvertTo-SecureString $p -AsPlainText -Force
-          if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) {
-            Set-LocalUser -Name "RDP" -Password $secure
-          } else {
-            New-LocalUser -Name "RDP" -Password $secure -AccountNeverExpires | Out-Null
-          }
+          $U='ABCDEFGHJKLMNPQRSTUVWXYZ'.ToCharArray(); $L='abcdefghijkmnpqrstuvwxyz'.ToCharArray()
+          $N='23456789'.ToCharArray(); $S='@#%&*!'.ToCharArray(); $A=$U+$L+$N+$S
+          $parts=@(); $parts+=($U|Get-Random); $parts+=($L|Get-Random)
+          $parts+=($N|Get-Random); $parts+=($S|Get-Random)
+          $parts+=(1..10|ForEach-Object{$A|Get-Random})
+          $p=-join ($parts|Sort-Object{Get-Random})
+          $secure=ConvertTo-SecureString $p -AsPlainText -Force
+          if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) { Set-LocalUser -Name "RDP" -Password $secure }
+          else { New-LocalUser -Name "RDP" -Password $secure -AccountNeverExpires | Out-Null }
           Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
-          "RDP_USER=RDP" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-          "RDP_PASS=$p"  | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "RDP_PASS=$p" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "RDP user ready."
 
-      # ----------------------------------------------------
-      # 3. Tailscale install
-      # ----------------------------------------------------
-      - name: Install Tailscale
+      - name: "[Win] Install Tailscale"
+        if: inputs.os == 'windows' && inputs.tailscale == 'yes'
         shell: pwsh
         run: |
-          $msi = "$env:TEMP\tailscale.msi"
+          $msi="$env:TEMP\tailscale.msi"
           Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile $msi
-          Start-Process msiexec.exe -ArgumentList "/i", $msi, "/quiet", "/norestart" -Wait
+          Start-Process msiexec.exe -ArgumentList "/i",$msi,"/quiet","/norestart" -Wait
           Remove-Item $msi -Force -ErrorAction SilentlyContinue
           Write-Host "Tailscale installed."
 
-      # ----------------------------------------------------
-      # 4. KEY CHECK — sabse important step
-      #    Galat key ho toh yahin pakad leta hai, 24 sec barbaad nahi
-      # ----------------------------------------------------
-      - name: Validate Tailscale key
+      - name: "[Win] Validate key + connect"
+        if: inputs.os == 'windows' && inputs.tailscale == 'yes'
         shell: pwsh
         run: |
-          $k = "${{ secrets.TAILSCALE_AUTH_KEY }}".Trim()
-          $mode = "${{ inputs.auth_mode }}"
-
-          Write-Host "=========================================="
-          Write-Host "  TAILSCALE KEY CHECK"
-          Write-Host "=========================================="
-
-          if ([string]::IsNullOrWhiteSpace($k)) {
-            Write-Host "  [!] TAILSCALE_AUTH_KEY secret KHALI hai."
-            "TS_MODE=link" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          $ts="$env:ProgramFiles\Tailscale\tailscale.exe"
+          $k="${{ secrets.TAILSCALE_AUTH_KEY }}".Trim()
+          $pcName="gh-pc-$env:GITHUB_RUN_ID"
+          if ($k -notmatch '^tskey-auth-') {
+            Write-Host "=========================================="
+            Write-Host "  GALAT KEY!  'tskey-auth-...' chahiye."
+            Write-Host "  (tu ne API token dala hai shayad)"
+            Write-Host "=========================================="
+            exit 0
           }
-          elseif ($k -notmatch '^tskey-auth-') {
-            Write-Host "  [!] GALAT KEY TYPE!"
-            Write-Host "  Tu ne 'tskey-api-...' (API access token) dala hai."
-            Write-Host "  Chahiye: 'tskey-auth-...' (AUTH KEY)."
-            Write-Host "  Dono ek hi page pe bante hain — Keys page ka pehla tab."
-            "TS_MODE=link" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-          }
-          elseif ($k.Length -lt 30) {
-            Write-Host "  [!] Key adhura copy hua hai (length $($k.Length))."
-            "TS_MODE=link" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-          }
-          elseif ($mode -eq "link") {
-            "TS_MODE=link" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-          }
-          else {
-            Write-Host "  [OK] Key format sahi hai (tskey-auth-...)."
-            "TS_MODE=key" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-          }
-          Write-Host "=========================================="
-
-      # ----------------------------------------------------
-      # 5. Connect — KEY mode
-      # ----------------------------------------------------
-      - name: Connect Tailscale (key)
-        if: env.TS_MODE == 'key'
-        shell: pwsh
-        run: |
-          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
-          $k  = "${{ secrets.TAILSCALE_AUTH_KEY }}".Trim()
-          $pcName = "gh-pc-$env:GITHUB_RUN_ID"
-          Write-Host "Trying auth key on hostname $pcName ..."
           & $ts "up" "--authkey=$k" "--hostname=$pcName" 2>&1 | Out-Host
           Start-Sleep -Seconds 12
-          $st = & $ts "status" 2>&1 | Out-String
-          if ($st -match 'NeedsLogin|invalid key|Logged out') {
-            Write-Host "  [FAIL] Key kaam nahi kiya -> link mode pe jaa raha hoon."
-            "TS_NEED_LINK=true" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-          } else {
-            Write-Host "  [OK] Tailscale connected with key."
-            "TS_NEED_LINK=false" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-          }
+          $ip = & $ts "ip" "-4" 2>$null | Select-String -Pattern '^100\.' | Select-Object -First 1
+          if ($ip) { "TS_IP=$ip" | Out-File $env:GITHUB_ENV -Append -Encoding utf8 }
+          Write-Host "Tailscale IP: $ip"
 
-      # ----------------------------------------------------
-      # 6. Connect — LINK mode (koi key nahi chahiye!)
-      #    Ye tujhe ek login link dega, uspe tap karke Google se login
-      # ----------------------------------------------------
-      - name: Connect Tailscale (login link)
-        if: env.TS_MODE == 'link' || env.TS_NEED_LINK == 'true'
-        shell: pwsh
-        run: |
-          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
-          $pcName = "gh-pc-$env:GITHUB_RUN_ID"
-          $out = "$env:TEMP\ts_out.txt"
-          $err = "$env:TEMP\ts_err.txt"
-          Remove-Item $out,$err -ErrorAction SilentlyContinue
-
-          Start-Process -FilePath $ts -ArgumentList "up","--hostname=$pcName" `
-            -RedirectStandardOutput $out -RedirectStandardError $err -WindowStyle Hidden -PassThru | Out-Null
-
-          $link = $null
-          for ($i=0; $i -lt 12; $i++) {
-            Start-Sleep -Seconds 5
-            $log = ""
-            if (Test-Path $out) { $log += (Get-Content $out -Raw -ErrorAction SilentlyContinue) }
-            if (Test-Path $err) { $log += (Get-Content $err -Raw -ErrorAction SilentlyContinue) }
-            $m = [regex]::Match($log, 'https://login\.tailscale\.com/\S+')
-            if ($m.Success) { $link = $m.Value.Trim(); break }
-          }
-
-          if ($link) {
-            Write-Host "=================================================="
-            Write-Host "  TAILSCALE LOGIN LINK  (5 minute mein expire)"
-            Write-Host ""
-            Write-Host "  $link"
-            Write-Host ""
-            Write-Host "  Is link ko phone ke CHROME mein khol."
-            Write-Host "  (Lemur Browser mat kholna — Google usme login block karta hai)"
-            Write-Host "  Google se sign in kar. Bas, ho gaya."
-            Write-Host "=================================================="
-          } else {
-            Write-Host "  [X] Link nahi mila. Key dobara check kar (tskey-auth- wali, Reusable ON)."
-          }
-
-      # ----------------------------------------------------
-      # 7. Tailscale IP nikaal
-      # ----------------------------------------------------
-      - name: Get Tailscale IP
-        shell: pwsh
-        run: |
-          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
-          $ip = $null
-          for ($i=0; $i -lt 12; $i++) {
-            Start-Sleep -Seconds 10
-            $ip = (& $ts "ip" "-4" 2>$null | Select-String -Pattern '^100\.' | Select-Object -First 1)
-            if ($ip) { break }
-          }
-          if ($ip) {
-            "TS_IP=$ip" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-            Write-Host "Tailscale IP: $ip"
-          } else {
-            Write-Host "Tailscale IP nahi mila (abhi tak login nahi hua?)."
-          }
-
-      # ----------------------------------------------------
-      # 8. OmniRush download + silent install
-      # ----------------------------------------------------
-      - name: Install OmniRush
-        if: inputs.install_omnirush == 'yes'
+      - name: "[Win] Install OmniRush GUI"
+        if: inputs.os == 'windows' && inputs.install_omnirush == 'yes'
         shell: pwsh
         continue-on-error: true
         run: |
-          $url = "https://github.com/omnirush-ai/omnirush-gui/releases/latest/download/omnirush-win-x64-2.2.17.exe"
-          $exe = "$env:USERPROFILE\Desktop\OmniRush.exe"
-          Write-Host "Downloading OmniRush..."
+          $url=$null; $ver="unknown"
+          try {
+            $rel=Invoke-RestMethod -Uri "https://api.github.com/repos/omnirush-ai/omnirush-gui/releases/latest" -Headers @{"User-Agent"="AgentZero"} -TimeoutSec 60
+            $ver=$rel.tag_name
+            $asset=$rel.assets | Where-Object { $_.name -like "omnirush-win-x64-*.exe" -and $_.name -notlike "*.blockmap" } | Select-Object -First 1
+            if ($asset) { $url=$asset.browser_download_url }
+          } catch {}
+          if (-not $url) {
+            $url="https://github.com/omnirush-ai/omnirush-gui/releases/latest/download/omnirush-win-x64-2.2.17.exe"
+            $ver="v2.2.17"
+          }
+          Write-Host "OmniRush $ver download ho raha hai..."
+          $exe="$env:USERPROFILE\Desktop\OmniRush.exe"
           Invoke-WebRequest -Uri $url -OutFile $exe
-          Write-Host "OmniRush Desktop par download ho gaya."
           Start-Process -FilePath $exe -ArgumentList "/S" -Wait
-          Write-Host "OmniRush installed."
-          $target = "$env:LOCALAPPDATA\Programs\omnirush\OmniRush.exe"
-          if (-not (Test-Path $target)) {
-            $found = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Filter "OmniRush.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($found) { $target = $found.FullName }
-          }
-          if (Test-Path $target) {
-            $w = New-Object -ComObject WScript.Shell
-            $s = $w.CreateShortcut("$env:USERPROFILE\Desktop\OmniRush.lnk")
-            $s.TargetPath = $target
-            $s.Save()
-            Write-Host "OmniRush desktop shortcut ready."
-          }
+          Write-Host "OmniRush install ho gaya. Desktop pe shortcut hai."
+          Start-Sleep -Seconds 5
+          $gui=Get-ChildItem "$env:LOCALAPPDATA\Programs" -Filter "OmniRush*.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($gui) { Start-Process $gui.FullName; Write-Host "OmniRush chalu kar diya." }
 
-      # ----------------------------------------------------
-      # 9. OPTIONAL: apni koi file Desktop pe
-      # ----------------------------------------------------
-      - name: Download your file to Desktop
-        shell: pwsh
-        run: |
-          $url = "${{ inputs.file_url }}"
-          if ($url -and $url.StartsWith("http")) {
-            try {
-              $dest = "$env:USERPROFILE\Desktop\" + [System.IO.Path]::GetFileName($url)
-              Invoke-WebRequest -Uri $url -OutFile $dest
-              Write-Host "Downloaded: $dest"
-            } catch { Write-Host "Download fail: $_" }
-          }
-
-      # ----------------------------------------------------
-      # 10. CONNECTION DETAILS — yahan se copy kar
-      # ----------------------------------------------------
-      - name: SHOW CONNECTION DETAILS
+      - name: "[Win] Show connection details"
+        if: inputs.os == 'windows' && inputs.mode == 'pc'
         shell: pwsh
         run: |
           Write-Host ""
           Write-Host "=========================================================="
-          Write-Host "   TERRA PC TAIYAAR HAI"
+          Write-Host "   TERRA WINDOWS PC TAIYAAR HAI"
           Write-Host "=========================================================="
-          Write-Host ""
           Write-Host "   USER     : RDP"
           Write-Host "   PASSWORD : $env:RDP_PASS"
-          Write-Host ""
-          if ($env:TS_IP) {
-            Write-Host "   ---- TARIKA 1: Tailscale RDP ----"
-            Write-Host "   ADDRESS  : $($env:TS_IP):3389"
-            Write-Host "   (phone me Tailscale app ON + RD Client app)"
-            Write-Host ""
-          }
-          Write-Host "   Desktop pe OmniRush ready hai (agar yes kiya tha)."
+          if ($env:TS_IP) { Write-Host "   ADDRESS  : $($env:TS_IP):3389" }
+          Write-Host "   Desktop pe OmniRush ready hai."
           Write-Host "=========================================================="
-          Write-Host ""
 
-      # ----------------------------------------------------
-      # 11. Keep alive
-      # ----------------------------------------------------
-      - name: Keep PC alive
+      - name: "[Win] Keep alive"
+        if: inputs.os == 'windows' && inputs.mode == 'pc'
         shell: pwsh
         run: |
-          $hours  = [int]"${{ inputs.hours }}"
-          $endAt  = (Get-Date).AddHours($hours)
-          $ts     = "$env:ProgramFiles\Tailscale\tailscale.exe"
-          Write-Host "PC chalega $hours ghante, tab tak: $endAt"
-          $n = 0
+          $ts="$env:ProgramFiles\Tailscale\tailscale.exe"
+          $endAt=(Get-Date).AddHours(${{ inputs.hours }})
+          Write-Host "PC ${{ inputs.hours }} ghante chalega, tab tak: $endAt"
+          $n=0
           while ((Get-Date) -lt $endAt) {
-            Start-Sleep -Seconds 60
-            $n++
+            Start-Sleep -Seconds 60; $n++
             if ($n % 5 -eq 0) {
-              $ip = (& $ts "ip" "-4" 2>$null | Select-String -Pattern '^100\.' | Select-Object -First 1)
-              Write-Host "[alive $(Get-Date -Format HH:mm)] Tailscale IP: $ip | user: RDP | pass: $env:RDP_PASS"
+              $ip = & $ts "ip" "-4" 2>$null | Select-String -Pattern '^100\.' | Select-Object -First 1
+              Write-Host "[alive $(Get-Date -Format HH:mm)] IP: $ip | user: RDP | pass: $env:RDP_PASS"
             }
           }
-          Write-Host "Time khatam. Band ho raha hai."
+          Write-Host "Time khatam."
+
+      # ============================================================
+      #  COMMON — save session + artifacts
+      # ============================================================
+      - name: Save OmniRush session
+        if: always() && inputs.os == 'linux'
+        shell: bash
+        run: |
+          if [ -f "$HOME/.omnirush/auth.json" ]; then
+            echo "Naye OMNIRUSH_AUTH ke liye:"; base64 -w0 "$HOME/.omnirush/auth.json"; echo ""
+          fi
+
+      - name: Upload output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: omnirush-${{ inputs.os }}-${{ github.run_id }}
+          path: |
+            omnirush-output.txt
+          if-no-files-found: ignore
           

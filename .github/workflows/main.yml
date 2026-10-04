@@ -1,46 +1,29 @@
 # ============================================================
-#  FREE WINDOWS CLOUD PC — FIXED VERSION (Tailscale key bug gone)
+#  FREE WINDOWS CLOUD PC — MEGA EDITION
 # ============================================================
-#  Ye version 3 cheezein theek karta hai:
-#   1. Key GALAT ho toh 24 second barbaad nahi karta -> TURANT bata deta hai
-#   2. Key fail ho toh APNI AAP "link mode" pe chala jata hai
-#   3. OmniRush khud download + silent install hota hai Desktop pe
+#  Tailscale key bug fix + 8 naye features:
+#    1.  TIME SET sabse upar (pehla input)
+#    2.  OmniRush LATEST version khud dhoondhta hai (puraana URL bug fix)
+#    3.  Software pack — Chrome/VS Code/7-Zip/VLC/Node/Python/Git
+#    4.  Performance mode — effects off, updates off, high perf
+#    5.  Dark mode + saaf taskbar
+#    6.  Browser se status page + files (Cloudflare tunnel, koi client nahi)
+#    7.  Live countdown + har 5 min status
+#    8.  Connection details artifact mein save
 #
-#  SECRET: TAILSCALE_AUTH_KEY  ->  sirf "tskey-auth-..." wali key
-#          (tskey-api-... NAHI chalegi — wo API token hai, auth key nahi)
+#  SECRET: TAILSCALE_AUTH_KEY -> sirf "tskey-auth-..." wali
+#          (tskey-api-... NAHI chalegi)
 # ============================================================
-name: Free Windows PC OMNIRUSH
+
+name: Free Windows Cloud PC MEGA
 
 on:
   workflow_dispatch:
     inputs:
-      auth_mode:
-        description: 'auto = key try karo, fail ho toh link dikhao  |  key  |  link'
-        required: true
-        default: 'auto'
-        type: choice
-        options:
-          - auto
-          - key
-          - link
-      install_omnirush:
-        description: 'OmniRush khud download + silent install karu? (Desktop pe ready milega)'
-        required: true
-        default: 'yes'
-        type: choice
-        options:
-          - 'yes'
-          - 'no'
-      rdp_password:
-        description: 'RDP password (khali chhod -> khud ban jayega)'
-        required: false
-        default: ''
-      file_url:
-        description: 'OPTIONAL: koi file direct link se Desktop pe download karne ke liye'
-        required: false
-        default: ''
+
+      # ---------- SABSE ZAROORI: TIME ----------
       hours:
-        description: 'Kitne ghante chalu rakhe (max 5.5)'
+        description: '[1] Kitne ghante chalu rakhe? (max 5.5)'
         required: true
         default: '5'
         type: choice
@@ -51,28 +34,112 @@ on:
           - '4'
           - '5'
 
+      # ---------- CONNECTION ----------
+      auth_mode:
+        description: '[2] Tailscale: auto = key try, fail ho to link'
+        required: true
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - key
+          - link
+
+      rdp_password:
+        description: '[3] RDP password (khali chhod -> khud ban jayega)'
+        required: false
+        default: ''
+
+      # ---------- SOFTWARE ----------
+      software_pack:
+        description: '[4] Pehle se kya install karu?'
+        required: true
+        default: 'essential'
+        type: choice
+        options:
+          - none
+          - essential
+          - dev
+          - media
+          - gaming
+          - all
+
+      install_omnirush:
+        description: '[5] OmniRush (free AI coding agent) install karu?'
+        required: true
+        default: 'yes'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+
+      install_browsers:
+        description: '[6] Chrome + Firefox install karu?'
+        required: true
+        default: 'yes'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+
+      # ---------- LOOK & SPEED ----------
+      performance_mode:
+        description: '[7] Speed tweaks? (effects off, Windows Update off)'
+        required: true
+        default: 'yes'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+
+      dark_mode:
+        description: '[8] Dark theme + saaf taskbar?'
+        required: true
+        default: 'yes'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+
+      # ---------- EXTRA ----------
+      web_access:
+        description: '[9] Browser se status page + files? (Cloudflare, koi client nahi)'
+        required: true
+        default: 'yes'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+
+      file_url:
+        description: '[10] OPTIONAL: direct file link -> Desktop pe download'
+        required: false
+        default: ''
+
 jobs:
   cloud-pc:
     runs-on: windows-latest
     timeout-minutes: 355
 
     steps:
-      # ----------------------------------------------------
+      # ============================================================
       # 1. Remote Desktop ON
-      # ----------------------------------------------------
-      - name: Enable Remote Desktop
+      # ============================================================
+      - name: '[1/14] Remote Desktop ON'
         shell: pwsh
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 2 -Force
           netsh advfirewall firewall delete rule name="RDP-Tailscale" | Out-Null
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
-          Write-Host "Remote Desktop ON."
-      # ----------------------------------------------------
+          Write-Host "Remote Desktop ON ho gaya."
+
+      # ============================================================
       # 2. RDP user + strong password
-      # ----------------------------------------------------
-      - name: Create RDP user
+      # ============================================================
+      - name: '[2/14] RDP user banao'
         shell: pwsh
         run: |
           $p = "${{ inputs.rdp_password }}".Trim()
@@ -80,7 +147,7 @@ jobs:
             $U = 'ABCDEFGHJKLMNPQRSTUVWXYZ'.ToCharArray()
             $L = 'abcdefghijkmnpqrstuvwxyz'.ToCharArray()
             $N = '23456789'.ToCharArray()
-            $S = '@#%&*!'.ToCharArray()
+            $S = '@#%*!'.ToCharArray()
             $A = $U + $L + $N + $S
             $parts = @()
             $parts += ($U | Get-Random)
@@ -101,10 +168,91 @@ jobs:
           "RDP_USER=RDP" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           "RDP_PASS=$p"  | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "RDP user ready."
-      # ----------------------------------------------------
-      # 3. Tailscale install
-      # ----------------------------------------------------
-      - name: Install Tailscale
+
+      # ============================================================
+      # 3. MACHINE INFO (NEW)
+      # ============================================================
+      - name: '[3/14] Machine info'
+        shell: pwsh
+        run: |
+          $os = Get-CimInstance Win32_OperatingSystem
+          $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+          $ram = [math]::Round($os.TotalVisibleMemorySize/1MB, 1)
+          $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
+          $free = [math]::Round($disk.FreeSpace/1GB, 1)
+          Write-Host "=========================================="
+          Write-Host "  OS   : $($os.Caption)"
+          Write-Host "  CPU  : $($cpu.Name)"
+          Write-Host "  CORES: $($cpu.NumberOfCores) cores / $($cpu.NumberOfLogicalProcessors) threads"
+          Write-Host "  RAM  : $ram GB"
+          Write-Host "  DISK : $free GB free (C:)"
+          Write-Host "=========================================="
+
+      # ============================================================
+      # 4. PERFORMANCE MODE (NEW)
+      # ============================================================
+      - name: '[4/14] Performance tweaks'
+        if: inputs.performance_mode == 'yes'
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Write-Host "Speed tweaks lagaye jaa rahe hain..."
+          # High performance power plan
+          powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c 2>$null
+          # Hibernation off (disk bachao)
+          powercfg /hibernate off 2>$null
+          # Visual effects -> best performance
+          Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects' -Name 'VisualFXSetting' -Value 2 -Force -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name 'UserPreferencesMask' -Type Binary -Value ([byte[]](0x90,0x12,0x03,0x80,0x10,0x00,0x00,0x00)) -Force -ErrorAction SilentlyContinue
+          # Animations off
+          Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop\WindowMetrics' -Name 'MinAnimate' -Value '0' -Force -ErrorAction SilentlyContinue
+          # Menu delay 0
+          Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name 'MenuShowDelay' -Value '0' -Force -ErrorAction SilentlyContinue
+          # Windows Update OFF (RDP ke beech mein restart na ho)
+          Set-Service -Name wuauserv -StartupType Disabled -ErrorAction SilentlyContinue
+          Stop-Service -Name wuauserv -Force -ErrorAction SilentlyContinue
+          Set-Service -Name UsoSvc -StartupType Disabled -ErrorAction SilentlyContinue
+          Stop-Service -Name UsoSvc -Force -ErrorAction SilentlyContinue
+          Set-Service -Name BITS -StartupType Manual -ErrorAction SilentlyContinue
+          # Telemetry off
+          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection' -Name 'AllowTelemetry' -Value 0 -Force -ErrorAction SilentlyContinue
+          # Search indexing off (CPU bachao)
+          Set-Service -Name WSearch -StartupType Disabled -ErrorAction SilentlyContinue
+          Stop-Service -Name WSearch -Force -ErrorAction SilentlyContinue
+          # SysMain / Superfetch off
+          Set-Service -Name SysMain -StartupType Disabled -ErrorAction SilentlyContinue
+          Stop-Service -Name SysMain -Force -ErrorAction SilentlyContinue
+          Write-Host "Performance tweaks done."
+
+      # ============================================================
+      # 5. DARK MODE + CLEAN TASKBAR (NEW)
+      # ============================================================
+      - name: '[5/14] Dark mode + saaf taskbar'
+        if: inputs.dark_mode == 'yes'
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          # Apps dark
+          New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name 'AppsUseLightTheme' -Value 0 -PropertyType DWord -Force | Out-Null
+          # System dark
+          New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name 'SystemUsesLightTheme' -Value 0 -PropertyType DWord -Force | Out-Null
+          # Taskbar: chhote icons, widgets/cortana/taskview off
+          New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'TaskbarSmallIcons' -Value 1 -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'ShowTaskViewButton' -Value 0 -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'ShowCortanaButton' -Value 0 -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'TaskbarDa' -Value 0 -PropertyType DWord -Force | Out-Null
+          # File explorer: hidden files + extensions dikhao
+          New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'Hidden' -Value 1 -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'HideFileExt' -Value 0 -PropertyType DWord -Force | Out-Null
+          # Wallpaper: solid dark (registry se — koi C# nahi)
+          Set-ItemProperty -Path 'HKCU:\Control Panel\Colors' -Name 'Background' -Value '24 24 28' -Force -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name 'WallPaper' -Value '' -Force -ErrorAction SilentlyContinue
+          Write-Host "Dark mode done."
+
+      # ============================================================
+      # 6. TAILSCALE INSTALL
+      # ============================================================
+      - name: '[6/14] Tailscale install'
         shell: pwsh
         run: |
           $msi = "$env:TEMP\tailscale.msi"
@@ -112,11 +260,11 @@ jobs:
           Start-Process msiexec.exe -ArgumentList "/i", $msi, "/quiet", "/norestart" -Wait
           Remove-Item $msi -Force -ErrorAction SilentlyContinue
           Write-Host "Tailscale installed."
-      # ----------------------------------------------------
-      # 4. KEY CHECK — sabse important step
-      #    Galat key ho toh yahin pakad leta hai, 24 sec barbaad nahi
-      # ----------------------------------------------------
-      - name: Validate Tailscale key
+
+      # ============================================================
+      # 7. KEY CHECK (turant batao, 24 sec barbaad nahi)
+      # ============================================================
+      - name: '[7/14] Tailscale key check'
         shell: pwsh
         run: |
           $k = "${{ secrets.TAILSCALE_AUTH_KEY }}".Trim()
@@ -130,9 +278,8 @@ jobs:
           }
           elseif ($k -notmatch '^tskey-auth-') {
             Write-Host "  [!] GALAT KEY TYPE!"
-            Write-Host "  Tu ne 'tskey-api-...' (API access token) dala hai."
+            Write-Host "  Tu ne 'tskey-api-...' (API token) dala hai."
             Write-Host "  Chahiye: 'tskey-auth-...' (AUTH KEY)."
-            Write-Host "  Dono ek hi page pe bante hain — Keys page ka pehla tab."
             "TS_MODE=link" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           }
           elseif ($k.Length -lt 30) {
@@ -147,10 +294,11 @@ jobs:
             "TS_MODE=key" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           }
           Write-Host "=========================================="
-      # ----------------------------------------------------
-      # 5. Connect — KEY mode
-      # ----------------------------------------------------
-      - name: Connect Tailscale (key)
+
+      # ============================================================
+      # 8. CONNECT — KEY MODE
+      # ============================================================
+      - name: '[8/14] Connect Tailscale (key)'
         if: env.TS_MODE == 'key'
         shell: pwsh
         run: |
@@ -162,17 +310,17 @@ jobs:
           Start-Sleep -Seconds 12
           $st = & $ts "status" 2>&1 | Out-String
           if ($st -match 'NeedsLogin|invalid key|Logged out') {
-            Write-Host "  [FAIL] Key kaam nahi kiya -> link mode pe jaa raha hoon."
+            Write-Host "  [FAIL] Key kaam nahi kiya -> link mode."
             "TS_NEED_LINK=true" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           } else {
             Write-Host "  [OK] Tailscale connected with key."
             "TS_NEED_LINK=false" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           }
-      # ----------------------------------------------------
-      # 6. Connect — LINK mode (koi key nahi chahiye!)
-      #    Ye tujhe ek login link dega, uspe tap karke Google se login
-      # ----------------------------------------------------
-      - name: Connect Tailscale (login link)
+
+      # ============================================================
+      # 9. CONNECT — LINK MODE (koi key nahi chahiye)
+      # ============================================================
+      - name: '[9/14] Connect Tailscale (login link)'
         if: env.TS_MODE == 'link' || env.TS_NEED_LINK == 'true'
         shell: pwsh
         run: |
@@ -198,17 +346,16 @@ jobs:
             Write-Host ""
             Write-Host "  $link"
             Write-Host ""
-            Write-Host "  Is link ko phone ke CHROME mein khol."
-            Write-Host "  (Lemur Browser mat kholna — Google usme login block karta hai)"
-            Write-Host "  Google se sign in kar. Bas, ho gaya."
+            Write-Host "  Phone ke CHROME mein khol, Google se sign in."
             Write-Host "=================================================="
           } else {
-            Write-Host "  [X] Link nahi mila. Key dobara check kar (tskey-auth- wali, Reusable ON)."
+            Write-Host "  [X] Link nahi mila. Key dobara check kar."
           }
-      # ----------------------------------------------------
-      # 7. Tailscale IP nikaal
-      # ----------------------------------------------------
-      - name: Get Tailscale IP
+
+      # ============================================================
+      # 10. TAILSCALE IP
+      # ============================================================
+      - name: '[10/14] Tailscale IP nikaalo'
         shell: pwsh
         run: |
           $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
@@ -219,26 +366,119 @@ jobs:
             if ($ip) { break }
           }
           if ($ip) {
+            $ip = "$ip".Trim()
             "TS_IP=$ip" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
             Write-Host "Tailscale IP: $ip"
           } else {
-            Write-Host "Tailscale IP nahi mila (abhi tak login nahi hua?)."
+            Write-Host "Tailscale IP nahi mila (login pending?)."
           }
-      # ----------------------------------------------------
-      # 8. OmniRush download + silent install
-      # ----------------------------------------------------
-      - name: Install OmniRush
+
+      # ============================================================
+      # 11. SOFTWARE PACK (NEW — winget se)
+      # ============================================================
+      - name: '[11/14] Software install'
+        if: inputs.software_pack != 'none'
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $pack = "${{ inputs.software_pack }}"
+          $browsers = "${{ inputs.install_browsers }}"
+
+          function Inst($id, $name) {
+            Write-Host "   -> installing $name ..."
+            winget install --id $id -e --accept-source-agreements --accept-package-agreements --silent 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) { Write-Host "   [OK] $name" } else { Write-Host "   [skip] $name (pehle se hai ya fail)" }
+          }
+
+          if ($browsers -eq 'yes') {
+            Inst "Google.Chrome" "Google Chrome"
+            Inst "Mozilla.Firefox" "Mozilla Firefox"
+          }
+
+          if ($pack -in @('essential','all')) {
+            Inst "7zip.7zip" "7-Zip"
+            Inst "VideoLAN.VLC" "VLC Player"
+            Inst "Notepad++.Notepad++" "Notepad++"
+            Inst "voidtools.Everything" "Everything Search"
+            Inst "Microsoft.PowerToys" "PowerToys"
+          }
+
+          if ($pack -in @('dev','all')) {
+            Inst "Microsoft.VisualStudioCode" "VS Code"
+            Inst "Git.Git" "Git"
+            Inst "OpenJS.NodeJS.LTS" "Node.js LTS"
+            Inst "Python.Python.3.12" "Python 3.12"
+            Inst "GitHub.cli" "GitHub CLI"
+            Inst "Docker.DockerDesktop" "Docker Desktop"
+          }
+
+          if ($pack -in @('media','all')) {
+            Inst "Gyan.FFmpeg" "FFmpeg"
+            Inst "OBSProject.OBSStudio" "OBS Studio"
+            Inst "ImageMagick.ImageMagick" "ImageMagick"
+            Inst "Audacity.Audacity" "Audacity"
+            Inst "HandBrake.HandBrake" "HandBrake"
+          }
+
+          if ($pack -in @('gaming','all')) {
+            Inst "Valve.Steam" "Steam"
+            Inst "EpicGames.EpicGamesLauncher" "Epic Games"
+            Inst "Discord.Discord" "Discord"
+          }
+
+          Write-Host "Software pack done."
+
+      # ============================================================
+      # 12. OMNIRUSH — LATEST VERSION AUTO-DETECT (BUG FIX)
+      # ============================================================
+      - name: '[12/14] OmniRush install (latest)'
         if: inputs.install_omnirush == 'yes'
         shell: pwsh
         continue-on-error: true
         run: |
-          $url = "https://github.com/omnirush-ai/omnirush-gui/releases/latest/download/omnirush-win-x64-2.2.17.exe"
+          Write-Host "OmniRush ka latest version dhoondh rahe hain..."
           $exe = "$env:USERPROFILE\Desktop\OmniRush.exe"
-          Write-Host "Downloading OmniRush..."
-          Invoke-WebRequest -Uri $url -OutFile $exe
-          Write-Host "OmniRush Desktop par download ho gaya."
-          Start-Process -FilePath $exe -ArgumentList "/S" -Wait
-          Write-Host "OmniRush installed."
+          $url = $null
+
+          # Tareeka 1: latest.yml se asli filename nikaalo (electron-builder manifest)
+          try {
+            $yml = Invoke-RestMethod -Uri "https://github.com/omnirush-ai/omnirush-gui/releases/latest/download/latest.yml" -ErrorAction Stop
+            $raw = $yml -join "`n"
+            $m = [regex]::Match($raw, 'url:\s*(\S+\.exe)')
+            $v = [regex]::Match($raw, 'version:\s*(\S+)')
+            if ($m.Success) {
+              $file = $m.Groups[1].Value
+              $ver  = if ($v.Success) { $v.Groups[1].Value } else { "latest" }
+              $url  = "https://github.com/omnirush-ai/omnirush-gui/releases/latest/download/$file"
+              Write-Host "   manifest se mila: $file (version $ver)"
+            }
+          } catch { Write-Host "   manifest read fail" }
+
+          # Tareeka 2: GitHub API se asset list
+          if (-not $url) {
+            try {
+              $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/omnirush-ai/omnirush-gui/releases/latest" -Headers @{ 'User-Agent' = 'gh-actions' } -ErrorAction Stop
+              $asset = $rel.assets | Where-Object { $_.name -like 'omnirush-win-x64-*.exe' } | Select-Object -First 1
+              if ($asset) {
+                $url = $asset.browser_download_url
+                Write-Host "   API se mila: $($asset.name)"
+              }
+            } catch { Write-Host "   API read fail" }
+          }
+
+          # Tareeka 3: purana known-good URL
+          if (-not $url) {
+            $url = "https://github.com/omnirush-ai/omnirush-gui/releases/download/v2.2.17/omnirush-win-x64-2.2.17.exe"
+            Write-Host "   fallback: purana 2.2.17 URL"
+          }
+
+          Write-Host "   downloading: $url"
+          Invoke-WebRequest -Uri $url -OutFile $exe -ErrorAction Stop
+          Write-Host "   OmniRush Desktop par aa gaya."
+
+          Start-Process -FilePath $exe -ArgumentList "/S" -Wait -ErrorAction SilentlyContinue
+          Write-Host "   OmniRush install ho gaya."
+
           $target = "$env:LOCALAPPDATA\Programs\omnirush\OmniRush.exe"
           if (-not (Test-Path $target)) {
             $found = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Filter "OmniRush.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -249,62 +489,228 @@ jobs:
             $s = $w.CreateShortcut("$env:USERPROFILE\Desktop\OmniRush.lnk")
             $s.TargetPath = $target
             $s.Save()
-            Write-Host "OmniRush desktop shortcut ready."
+            Write-Host "   Desktop shortcut ready."
           }
-      # ----------------------------------------------------
-      # 9. OPTIONAL: apni koi file Desktop pe
-      # ----------------------------------------------------
-      - name: Download your file to Desktop
+
+      # ============================================================
+      # 13. WEB ACCESS — status page + files (NEW)
+      #      Cloudflare tunnel — koi client install nahi karna
+      # ============================================================
+      - name: '[13/14] Browser access (status page + files)'
+        if: inputs.web_access == 'yes'
         shell: pwsh
+        continue-on-error: true
+        run: |
+          $dir = "$env:USERPROFILE\Desktop\WebShare"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+
+          # status + files page
+                    $html = @(
+            '<!DOCTYPE html><html><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<title>Cloud PC</title>'
+            '<style>'
+            '*{box-sizing:border-box;margin:0;padding:0}'
+            'body{background:#0f1115;color:#e6e6ee;font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:18px;max-width:860px;margin:0 auto}'
+            'h1{font-size:22px;margin-bottom:4px}'
+            '.sub{color:#8b8b9c;font-size:12.5px;margin-bottom:16px}'
+            '.card{background:#171a21;border:1px solid #262a34;border-radius:14px;padding:15px;margin-bottom:13px}'
+            '.k{font-size:10.5px;letter-spacing:.14em;color:#7c7c8e;text-transform:uppercase;margin-bottom:5px}'
+            '.v{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:15px;color:#e8b96a;word-break:break-all}'
+            '.row{display:flex;gap:10px;flex-wrap:wrap}'
+            '.row>div{flex:1;min-width:200px}'
+            'a{color:#7ab8ff;text-decoration:none}'
+            'a:hover{text-decoration:underline}'
+            '.note{color:#8b8b9c;font-size:12.5px;line-height:1.7;margin-top:10px}'
+            '</style></head><body>'
+            '<h1>&#9672; Cloud PC</h1>'
+            '<div class="sub">Live status &#183; files &#183; connection info</div>'
+            '<div class="card"><div class="row">'
+            '  <div><div class="k">RDP User</div><div class="v">__USER__</div></div>'
+            '  <div><div class="k">RDP Password</div><div class="v">__PASS__</div></div>'
+            '</div></div>'
+            '<div class="card"><div class="k">RDP Address (Tailscale)</div><div class="v">__IP__:3389</div></div>'
+            '<div class="card"><div class="k">Hours</div><div class="v">__HOURS__ ghante</div></div>'
+            '<div class="card"><div class="k">Desktop Files</div><div id="f">loading...</div></div>'
+            '<div class="note">Ye page tab tak chalta hai jab tak workflow chalu hai.</div>'
+            '<script>'
+            'fetch(''/files.json'').then(function(r){return r.json()}).then(function(d){'
+            '  var h='''';'
+            '  (d.files||[]).forEach(function(f){'
+            '    h += ''<div style="padding:5px 0;border-bottom:1px solid #22252e"><a href="/f/''+encodeURIComponent(f)+''">''+f+''</a></div>'';'
+            '  });'
+            '  document.getElementById(''f'').innerHTML = h || ''<span style="color:#666">koi file nahi</span>'';'
+            '}).catch(function(){ document.getElementById(''f'').textContent=''(file list nahi mili)''; });'
+            '</script>'
+            '</body></html>'
+          ) -join "`n"
+          $html = $html.Replace('__USER__', $env:RDP_USER).Replace('__PASS__', $env:RDP_PASS).Replace('__IP__', $env:TS_IP).Replace('__HOURS__', "${{ inputs.hours }}")
+          $html | Out-File "$dir\index.html" -Encoding utf8
+
+          # tiny static server (python) — files + json
+                    $py = @(
+            'import http.server, socketserver, json, os, urllib.parse, html'
+            'D = os.path.join(os.path.expanduser("~"), "Desktop", "WebShare")'
+            'class H(http.server.SimpleHTTPRequestHandler):'
+            '    def __init__(self, *a, **k):'
+            '        super().__init__(*a, directory=D, **k)'
+            '    def do_GET(self):'
+            '        p = urllib.parse.urlparse(self.path).path'
+            '        if p == "/files.json":'
+            '            try:'
+            '                files = sorted(os.listdir(D))'
+            '                files = [f for f in files if f != "index.html"]'
+            '            except Exception:'
+            '                files = []'
+            '            body = json.dumps({"files": files}).encode()'
+            '            self.send_response(200)'
+            '            self.send_header("Content-Type", "application/json")'
+            '            self.send_header("Content-Length", str(len(body)))'
+            '            self.end_headers()'
+            '            self.wfile.write(body)'
+            '            return'
+            '        if p.startswith("/f/"):'
+            '            name = urllib.parse.unquote(p[3:])'
+            '            path = os.path.join(D, name)'
+            '            if os.path.isfile(path):'
+            '                self.send_response(200)'
+            '                self.send_header("Content-Type", "application/octet-stream")'
+            '                self.send_header("Content-Disposition", ''attachment; filename="%s"'' % name)'
+            '                self.send_header("Content-Length", str(os.path.getsize(path)))'
+            '                self.end_headers()'
+            '                with open(path, "rb") as fh:'
+            '                    self.wfile.write(fh.read())'
+            '                return'
+            '            self.send_error(404); return'
+            '        if p == "/" or p == "":'
+            '            self.path = "/index.html"'
+            '        return super().do_GET()'
+            '    def log_message(self, *a):'
+            '        pass'
+            'socketserver.TCPServer.allow_reuse_address = True'
+            'with socketserver.ThreadingTCPServer(("127.0.0.1", 8099), H) as httpd:'
+            '    httpd.serve_forever()'
+          ) -join "`n"
+          $py | Out-File "$env:TEMP\srv.py" -Encoding utf8
+          Start-Process -FilePath "python" -ArgumentList "$env:TEMP\srv.py" -WindowStyle Hidden -PassThru | Out-Null
+          Start-Sleep -Seconds 3
+
+          # cloudflared quick tunnel
+          $cf = "$env:TEMP\cloudflared.exe"
+          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile $cf
+          $cfOut = "$env:TEMP\cf.log"
+          Start-Process -FilePath $cf -ArgumentList "tunnel","--url","http://127.0.0.1:8099","--no-autoupdate" `
+            -RedirectStandardOutput $cfOut -RedirectStandardError $cfOut -WindowStyle Hidden -PassThru | Out-Null
+
+          $link = $null
+          for ($i=0; $i -lt 20; $i++) {
+            Start-Sleep -Seconds 4
+            if (Test-Path $cfOut) {
+              $t = Get-Content $cfOut -Raw -ErrorAction SilentlyContinue
+              $m = [regex]::Match($t, 'https://[a-z0-9\-]+\.trycloudflare\.com')
+              if ($m.Success) { $link = $m.Value; break }
+            }
+          }
+          if ($link) {
+            "CF_LINK=$link" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "=================================================="
+            Write-Host "  BROWSER ACCESS LINK (koi client nahi chahiye)"
+            Write-Host ""
+            Write-Host "  $link"
+            Write-Host ""
+            Write-Host "  Phone/PC ke browser mein khol — status + files."
+            Write-Host "=================================================="
+          } else {
+            Write-Host "  [X] Cloudflare tunnel nahi bana."
+          }
+
+      # ============================================================
+      # 13b. OPTIONAL FILE DOWNLOAD
+      # ============================================================
+      - name: '[13b/14] Apni file Desktop pe'
+        if: inputs.file_url != ''
+        shell: pwsh
+        continue-on-error: true
         run: |
           $url = "${{ inputs.file_url }}"
           if ($url -and $url.StartsWith("http")) {
-            try {
-              $dest = "$env:USERPROFILE\Desktop\" + [System.IO.Path]::GetFileName($url)
-              Invoke-WebRequest -Uri $url -OutFile $dest
-              Write-Host "Downloaded: $dest"
-            } catch { Write-Host "Download fail: $_" }
+            $dest = Join-Path "$env:USERPROFILE\Desktop" ([System.IO.Path]::GetFileName($url))
+            Invoke-WebRequest -Uri $url -OutFile $dest
+            Write-Host "Downloaded: $dest"
           }
-      # ----------------------------------------------------
-      # 10. CONNECTION DETAILS — yahan se copy kar
-      # ----------------------------------------------------
-      - name: SHOW CONNECTION DETAILS
+
+      # ============================================================
+      # 14. CONNECTION DETAILS + ARTIFACT
+      # ============================================================
+      - name: '[14/14] CONNECTION DETAILS'
         shell: pwsh
         run: |
+          $ip = $env:TS_IP
+          $cf = $env:CF_LINK
           Write-Host ""
           Write-Host "=========================================================="
-          Write-Host "   TERRA PC TAIYAAR HAI"
+          Write-Host "        TERRA PC TAIYAAR HAI  -  ${{ inputs.hours }} HOURS"
           Write-Host "=========================================================="
           Write-Host ""
-          Write-Host "   USER     : RDP"
+          Write-Host "   USER     : $env:RDP_USER"
           Write-Host "   PASSWORD : $env:RDP_PASS"
           Write-Host ""
-          if ($env:TS_IP) {
+          if ($ip) {
             Write-Host "   ---- TARIKA 1: Tailscale RDP ----"
-            Write-Host "   ADDRESS  : $($env:TS_IP):3389"
-            Write-Host "   (phone me Tailscale app ON + RD Client app)"
+            Write-Host "   ADDRESS  : ${ip}:3389"
+            Write-Host "   (Tailscale app ON + RD Client app)"
             Write-Host ""
           }
-          Write-Host "   Desktop pe OmniRush ready hai (agar yes kiya tha)."
+          if ($cf) {
+            Write-Host "   ---- TARIKA 2: Browser (koi client nahi) ----"
+            Write-Host "   $cf"
+            Write-Host ""
+          }
+          Write-Host "   Desktop pe OmniRush + software ready hain."
           Write-Host "=========================================================="
           Write-Host ""
-      # ----------------------------------------------------
-      # 11. Keep alive
-      # ----------------------------------------------------
+
+          # artifact ke liye file
+          $out = "$env:RUNNER_TEMP\CONNECT.txt"
+                    $txt = @(
+            "CLOUD PC - CONNECTION DETAILS"
+            "============================="
+            "TIME      : ${{ inputs.hours }} hours"
+            "USER      : $env:RDP_USER"
+            "PASSWORD  : $env:RDP_PASS"
+            "TS_IP     : $ip"
+            "RDP       : ${ip}:3389"
+            "WEB       : $cf"
+          ) -join "`n"
+          $txt | Out-File $out -Encoding utf8
+
+      - name: Save connection details
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloud-pc-connection
+          path: ${{ runner.temp }}\CONNECT.txt
+
+      # ============================================================
+      # 15. KEEP ALIVE + LIVE COUNTDOWN
+      # ============================================================
       - name: Keep PC alive
         shell: pwsh
         run: |
-          $hours  = [int]"${{ inputs.hours }}"
-          $endAt  = (Get-Date).AddHours($hours)
-          $ts     = "$env:ProgramFiles\Tailscale\tailscale.exe"
-          Write-Host "PC chalega $hours ghante, tab tak: $endAt"
+          $hours = [int]"${{ inputs.hours }}"
+          $endAt = (Get-Date).AddHours($hours)
+          $ts    = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          Write-Host "PC chalega $hours ghante. Band hoga: $endAt"
           $n = 0
           while ((Get-Date) -lt $endAt) {
             Start-Sleep -Seconds 60
             $n++
             if ($n % 5 -eq 0) {
+              $left = $endAt - (Get-Date)
               $ip = (& $ts "ip" "-4" 2>$null | Select-String -Pattern '^100\.' | Select-Object -First 1)
-              Write-Host "[alive $(Get-Date -Format HH:mm)] Tailscale IP: $ip | user: RDP | pass: $env:RDP_PASS"
+              if ($ip) { $ip = "$ip".Trim() }
+              $hh = [math]::Floor($left.TotalHours)
+              $mm = $left.Minutes
+              Write-Host "[alive $hh h $mm m bache] IP: $ip | user: $env:RDP_USER | pass: $env:RDP_PASS"
             }
           }
           Write-Host "Time khatam. Band ho raha hai."

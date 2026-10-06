@@ -1192,7 +1192,8 @@ jobs:
           fi
           echo "software done"
 
-      - name: #[10b/13] Wine (.exe chalega)'        if: inputs.install_wine == 'yes'
+      -      - name: 'Wine install'
+        if: inputs.install_wine == 'yes'
         shell: bash
         continue-on-error: true
         run: |

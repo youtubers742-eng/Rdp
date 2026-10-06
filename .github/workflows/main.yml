@@ -195,7 +195,7 @@ jobs:
       # ============================================================
       - name: '[2/14] RDP user banao'
         shell: pwsh
-        run: |$p = "${{ inputs.pc_password }}".Trim()
+        run: $p = "${{ inputs.pc_password }}".Trim()
           if ($p.Length -lt 10) {
             $U = 'ABCDEFGHJKLMNPQRSTUVWXYZ'.ToCharArray()
             $L = 'abcdefghijkmnpqrstuvwxyz'.ToCharArray()

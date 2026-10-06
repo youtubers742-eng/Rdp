@@ -172,8 +172,6 @@ jobs:
   win:
     if: inputs.os == 'windows11'
     name: Windows 11 Cloud PC
-    if: inputs.os == 'windows11'
-    name: Windows 11 Cloud PC
     runs-on: windows-latest
     timeout-minutes: 355
 
@@ -197,7 +195,7 @@ jobs:
       # ============================================================
       - name: '[2/14] RDP user banao'
         shell: pwsh
-        run: |          $p = "${{ inputs.rdp_password }}".Trim()
+        run: |          $p = "${{ inputs.pc_password }}".Trim()
           if ($p.Length -lt 10) {
             $U = 'ABCDEFGHJKLMNPQRSTUVWXYZ'.ToCharArray()
             $L = 'abcdefghijkmnpqrstuvwxyz'.ToCharArray()
@@ -395,9 +393,10 @@ jobs:
             $m = [regex]::Match($log, 'https://login\.tailscale\.com/\S+')
             if ($m.Success) { $link = $m.Value.Trim(); break }
           }
-          if ($link) {            Write-Host "  TAILSCALE LOGIN LINK  (5 minute mein expire)"
-            Write-Host ""
-            Write-Host "  $link"
+          if ($link) {
+            Write-Host "=================================================="
+            Write-Host "  TAILSCALE LOGIN LINK  (5 minute mein expire)"
+            Write-Host ""            Write-Host "  $link"
             Write-Host ""
             Write-Host "  Phone ke CHROME mein khol, Google se sign in."
             Write-Host "=================================================="
@@ -558,7 +557,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
 
           # status + files page
-                    $html = @(
+          $html = @(
             '<!DOCTYPE html><html><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             '<title>Cloud PC</title>'
@@ -595,13 +594,12 @@ jobs:
             '  document.getElementById(''f'').innerHTML = h || ''<span style="color:#666">koi file nahi</span>'';'
             '}).catch(function(){ document.getElementById(''f'').textContent=''(file list nahi mili)''; });'
             '</script>'
-            Write-Host "=================================================="            '</body></html>'
-          ) -join "`n"
-          $html = $html.Replace('__USER__', $env:RDP_USER).Replace('__PASS__', $env:RDP_PASS).Replace('__IP__', $env:TS_IP).Replace('__HOURS__', "${{ inputs.hours }}")
+            '</body></html>'
+          ) -join "`n"          $html = $html.Replace('__USER__', $env:RDP_USER).Replace('__PASS__', $env:RDP_PASS).Replace('__IP__', $env:TS_IP).Replace('__HOURS__', "${{ inputs.hours }}")
           $html | Out-File "$dir\index.html" -Encoding utf8
 
           # tiny static server (python) — files + json
-                    $py = @(
+          $py = @(
             'import http.server, socketserver, json, os, urllib.parse, html'
             'D = os.path.join(os.path.expanduser("~"), "Desktop", "WebShare")'
             'class H(http.server.SimpleHTTPRequestHandler):'
@@ -725,7 +723,7 @@ jobs:
 
           # artifact ke liye file
           $out = "$env:RUNNER_TEMP\CONNECT.txt"
-                    $txt = @(
+          $txt = @(
             "CLOUD PC - CONNECTION DETAILS"
             "============================="
             "TIME      : ${{ inputs.hours }} hours"
@@ -794,9 +792,9 @@ jobs:
           PW="${{ inputs.pc_password }}"
           if [ -z "$PW" ]; then
             PW=$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 12)
-          fi          echo "$PW" > /tmp/PW
-          echo "runner:$PW" | sudo chpasswd
-          echo "PC_USER=runner" >> $GITHUB_ENV
+          fi
+          echo "$PW" > /tmp/PW
+          echo "runner:$PW" | sudo chpasswd           echo "PC_USER=runner" >> $GITHUB_ENV
           echo "PC_PASSWORD=$PW" >> $GITHUB_ENV
           echo "password set (${#PW} chars)"
 
@@ -993,9 +991,9 @@ jobs:
           mkdir -p "$XD"
           printf '%s\n' \
             '<?xml version="1.0" encoding="UTF-8"?>' \
-            '<channel name="xfce4-panel" version="1.0">' \            '  <property name="panels" type="array">' \
-            '    <value type="int" value="1"/>' \
-            '  </property>' \
+            '<channel name="xfce4-panel" version="1.0">' \
+            '  <property name="panels" type="array">' \
+            '    <value type="int" value="1"/>' \             '  </property>' \
             '  <property name="panels-dark-mode" type="bool" value="true"/>' \
             '  <property name="panel-1" type="empty">' \
             '    <property name="position" type="string" value="p=6;x=0;y=0"/>' \
@@ -1041,6 +1039,7 @@ jobs:
 
       # ============================================================
       - name: '[6/13] Windows 11 wallpaper'
+        if: inputs.wallpaper == 'yes'
         shell: bash
         run: |
           mkdir -p "$HOME/Pictures"
@@ -1190,8 +1189,10 @@ jobs:
           fi
           if [ "$PACK" = "media" ] || [ "$PACK" = "all" ]; then
             sudo apt-get install -y -qq ffmpeg gimp audacity handbrake 2>&1 | tail -2
-          fi      - name: '[10b/13] Wine (.exe chalega)'
-        if: inputs.install_wine == 'yes'
+          fi
+          echo "software done"
+
+      - name: '[10b/13] Wine (.exe chalega)'        if: inputs.install_wine == 'yes'
         shell: bash
         continue-on-error: true
         run: |
@@ -1256,7 +1257,7 @@ jobs:
           [ -n "$IP" ] && echo "TS_IP=$IP" >> $GITHUB_ENV && echo "Tailscale IP: $IP" || echo "IP nahi mila"
 
       - name: '[12b/13] Browser access link'
-        if: inputs.browser_access == 'yes'
+        if: inputs.web_access == 'yes'
         shell: bash
         continue-on-error: true
         run: |
@@ -1345,6 +1346,3 @@ jobs:
             fi
           done
           echo "Time khatam."
-          
-          echo "software done"
-          

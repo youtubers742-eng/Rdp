@@ -1,0 +1,1268 @@
+# ============================================================
+#  CLOUD PC — Windows 11  YA  Winux (ek hi workflow)
+# ============================================================
+#  Run workflow dabao -> pehla option: "os"
+#     windows11  => asli Windows 11 (RDP + OmniRush + browser)
+#     winux      => Linux desktop jo bilkul Windows 11 dikhe (RDP + browser + Wine .exe)
+#
+#  Dono mein milta hai:
+#    - TIME set (kitne ghante alive)          <- doosra option
+#    - RDP (Tailscale) + BROWSER ACCESS (koi client nahi)
+#    - Software pack, performance mode, dark mode
+#    - Live countdown, connection artifact
+#
+#  SECRET: TAILSCALE_AUTH_KEY -> sirf "tskey-auth-..." wali
+#          (tskey-api-... NAHI chalegi)
+# ============================================================
+
+name: Cloud PC
+
+on:
+  workflow_dispatch:
+    inputs:
+
+      # ================= PEHLA: OS =================
+      os:
+        description: '[★] Kaunsa chahiye? Windows 11 ya Winux'
+        required: true
+        default: 'windows11'
+        type: choice
+        options:
+          - windows11
+          - winux
+
+      # ================= DOOSRA: TIME =================
+      hours:
+        description: '[★] Kitne ghante alive rakhe? (max 5.5)'
+        required: true
+        default: '5'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - '5'
+
+      # ================= CONNECTION =================
+      auth_mode:
+        description: 'Tailscale: auto = key try, fail ho to login link'
+        required: true
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - key
+          - link
+
+      pc_password:
+        description: 'Password (khali chhod -> khud strong banega)'
+        required: false
+        default: ''
+
+      # ================= SOFTWARE =================
+      software_pack:
+        description: 'Software pack'
+        required: true
+        default: 'essential'
+        type: choice
+        options:
+          - none
+          - essential
+          - dev
+          - media
+          - gaming
+          - all
+
+      web_access:
+        description: 'Browser se access? (koi client install nahi karna)'
+        required: true
+        default: 'yes'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+
+      file_url:
+        description: 'OPTIONAL: koi file direct Desktop pe download karne ke liye'
+        required: false
+        default: ''
+
+      # ================= SIRF WINDOWS 11 =================
+      install_omnirush:
+        description: '[WIN only] OmniRush (free AI coding agent)'
+        required: true
+        default: 'yes'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+
+      performance_mode:
+        description: '[WIN only] Speed tweaks (effects off, Windows Update off)'
+        required: true
+        default: 'yes'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+
+      dark_mode:
+        description: '[WIN only] Dark theme + saaf taskbar'
+        required: true
+        default: 'yes'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+
+      install_browsers:
+        description: '[WIN only] Chrome + Firefox'
+        required: true
+        default: 'yes'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+
+      # ================= SIRF WINUX =================
+      theme:
+        description: '[WINUX only] Windows look'
+        required: true
+        default: 'win11'
+        type: choice
+        options:
+          - win11
+          - win10
+          - plain
+
+      wallpaper:
+        description: '[WINUX only] Windows wallpaper'
+        required: true
+        default: 'yes'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+
+      resolution:
+        description: '[WINUX only] Screen size'
+        required: true
+        default: '1600x900'
+        type: choice
+        options:
+          - '1280x720'
+          - '1600x900'
+          - '1920x1080'
+
+      install_wine:
+        description: '[WINUX only] Wine (.exe chalane ke liye)'
+        required: true
+        default: 'yes'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+
+jobs:
+  # ============================================================
+  #  JOB 1 — ASLI WINDOWS 11
+  # ============================================================
+  win:
+    if: inputs.os == 'windows11'
+    name: Windows 11 Cloud PC
+    runs-on: windows-latest
+    timeout-minutes: 355
+
+    steps:
+      # ============================================================
+      # 1. Remote Desktop ON
+      # ============================================================
+      - name: '[1/14] Remote Desktop ON'
+        shell: pwsh
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 2 -Force
+          netsh advfirewall firewall delete rule name="RDP-Tailscale" | Out-Null
+          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
+          Restart-Service -Name TermService -Force
+          Write-Host "Remote Desktop ON ho gaya."
+
+      # ============================================================
+      # 2. RDP user + strong password
+      # ============================================================
+      - name: '[2/14] RDP user banao'
+        shell: pwsh
+        run: |
+          $p = "${{ inputs.rdp_password }}".Trim()
+          if ($p.Length -lt 10) {
+            $U = 'ABCDEFGHJKLMNPQRSTUVWXYZ'.ToCharArray()            $L = 'abcdefghijkmnpqrstuvwxyz'.ToCharArray()
+            $N = '23456789'.ToCharArray()
+            $S = '@#%*!'.ToCharArray()
+            $A = $U + $L + $N + $S
+            $parts = @()
+            $parts += ($U | Get-Random)
+            $parts += ($L | Get-Random)
+            $parts += ($N | Get-Random)
+            $parts += ($S | Get-Random)
+            $parts += (1..10 | ForEach-Object { $A | Get-Random })
+            $p = -join ($parts | Sort-Object { Get-Random })
+          }
+          $secure = ConvertTo-SecureString $p -AsPlainText -Force
+          if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) {
+            Set-LocalUser -Name "RDP" -Password $secure
+          } else {
+            New-LocalUser -Name "RDP" -Password $secure -AccountNeverExpires | Out-Null
+          }
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
+          "RDP_USER=RDP" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "RDP_PASS=$p"  | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "RDP user ready."
+
+      # ============================================================
+      # 3. MACHINE INFO (NEW)
+      # ============================================================
+      - name: '[3/14] Machine info'
+        shell: pwsh
+        run: |
+          $os = Get-CimInstance Win32_OperatingSystem
+          $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+          $ram = [math]::Round($os.TotalVisibleMemorySize/1MB, 1)
+          $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
+          $free = [math]::Round($disk.FreeSpace/1GB, 1)
+          Write-Host "=========================================="
+          Write-Host "  OS   : $($os.Caption)"
+          Write-Host "  CPU  : $($cpu.Name)"
+          Write-Host "  CORES: $($cpu.NumberOfCores) cores / $($cpu.NumberOfLogicalProcessors) threads"
+          Write-Host "  RAM  : $ram GB"
+          Write-Host "  DISK : $free GB free (C:)"
+          Write-Host "=========================================="
+
+      # ============================================================
+      # 4. PERFORMANCE MODE (NEW)
+      # ============================================================
+      - name: '[4/14] Performance tweaks'
+        if: inputs.performance_mode == 'yes'
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Write-Host "Speed tweaks lagaye jaa rahe hain..."
+          # High performance power plan
+          powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c 2>$null
+          # Hibernation off (disk bachao)
+          powercfg /hibernate off 2>$null
+          # Visual effects -> best performance
+          Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects' -Name 'VisualFXSetting' -Value 2 -Force -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name 'UserPreferencesMask' -Type Binary -Value ([byte[]](0x90,0x12,0x03,0x80,0x10,0x00,0x00,0x00)) -Force -ErrorAction SilentlyContinue
+          # Animations off
+          Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop\WindowMetrics' -Name 'MinAnimate' -Value '0' -Force -ErrorAction SilentlyContinue
+          # Menu delay 0
+          Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name 'MenuShowDelay' -Value '0' -Force -ErrorAction SilentlyContinue
+          # Windows Update OFF (RDP ke beech mein restart na ho)
+          Set-Service -Name wuauserv -StartupType Disabled -ErrorAction SilentlyContinue
+          Stop-Service -Name wuauserv -Force -ErrorAction SilentlyContinue
+          Set-Service -Name UsoSvc -StartupType Disabled -ErrorAction SilentlyContinue
+          Stop-Service -Name UsoSvc -Force -ErrorAction SilentlyContinue
+          Set-Service -Name BITS -StartupType Manual -ErrorAction SilentlyContinue
+          # Telemetry off
+          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection' -Name 'AllowTelemetry' -Value 0 -Force -ErrorAction SilentlyContinue
+          # Search indexing off (CPU bachao)
+          Set-Service -Name WSearch -StartupType Disabled -ErrorAction SilentlyContinue
+          Stop-Service -Name WSearch -Force -ErrorAction SilentlyContinue
+          # SysMain / Superfetch off
+          Set-Service -Name SysMain -StartupType Disabled -ErrorAction SilentlyContinue
+          Stop-Service -Name SysMain -Force -ErrorAction SilentlyContinue
+          Write-Host "Performance tweaks done."
+
+      # ============================================================
+      # 5. DARK MODE + CLEAN TASKBAR (NEW)
+      # ============================================================
+      - name: '[5/14] Dark mode + saaf taskbar'
+        if: inputs.dark_mode == 'yes'
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          # Apps dark
+          New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name 'AppsUseLightTheme' -Value 0 -PropertyType DWord -Force | Out-Null
+          # System dark
+          New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name 'SystemUsesLightTheme' -Value 0 -PropertyType DWord -Force | Out-Null
+          # Taskbar: chhote icons, widgets/cortana/taskview off
+          New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'TaskbarSmallIcons' -Value 1 -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'ShowTaskViewButton' -Value 0 -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'ShowCortanaButton' -Value 0 -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'TaskbarDa' -Value 0 -PropertyType DWord -Force | Out-Null
+          # File explorer: hidden files + extensions dikhao
+          New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'Hidden' -Value 1 -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'HideFileExt' -Value 0 -PropertyType DWord -Force | Out-Null
+          # Wallpaper: solid dark (registry se — koi C# nahi)
+          Set-ItemProperty -Path 'HKCU:\Control Panel\Colors' -Name 'Background' -Value '24 24 28' -Force -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name 'WallPaper' -Value '' -Force -ErrorAction SilentlyContinue
+          Write-Host "Dark mode done."
+
+      # ============================================================
+      # 6. TAILSCALE INSTALL
+      # ============================================================
+      - name: '[6/14] Tailscale install'
+        shell: pwsh
+        run: |
+          $msi = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile $msi
+          Start-Process msiexec.exe -ArgumentList "/i", $msi, "/quiet", "/norestart" -Wait
+          Remove-Item $msi -Force -ErrorAction SilentlyContinue
+          Write-Host "Tailscale installed."
+
+      # ============================================================
+      # 7. KEY CHECK (turant batao, 24 sec barbaad nahi)
+      # ============================================================
+      - name: '[7/14] Tailscale key check'
+        shell: pwsh
+        run: |
+          $k = "${{ secrets.TAILSCALE_AUTH_KEY }}".Trim()
+          $mode = "${{ inputs.auth_mode }}"
+          Write-Host "=========================================="
+          Write-Host "  TAILSCALE KEY CHECK"
+          Write-Host "=========================================="
+          if ([string]::IsNullOrWhiteSpace($k)) {
+            Write-Host "  [!] TAILSCALE_AUTH_KEY secret KHALI hai."
+            "TS_MODE=link" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          }
+          elseif ($k -notmatch '^tskey-auth-') {
+            Write-Host "  [!] GALAT KEY TYPE!"
+            Write-Host "  Tu ne 'tskey-api-...' (API token) dala hai."
+            Write-Host "  Chahiye: 'tskey-auth-...' (AUTH KEY)."
+            "TS_MODE=link" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          }
+          elseif ($k.Length -lt 30) {
+            Write-Host "  [!] Key adhura copy hua hai (length $($k.Length))."
+            "TS_MODE=link" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          }
+          elseif ($mode -eq "link") {
+            "TS_MODE=link" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          }
+          else {
+            Write-Host "  [OK] Key format sahi hai (tskey-auth-...)."
+            "TS_MODE=key" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          }
+          Write-Host "=========================================="
+
+      # ============================================================
+      # 8. CONNECT — KEY MODE
+      # ============================================================
+      - name: '[8/14] Connect Tailscale (key)'
+        if: env.TS_MODE == 'key'
+        shell: pwsh
+        run: |
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          $k  = "${{ secrets.TAILSCALE_AUTH_KEY }}".Trim()
+          $pcName = "gh-pc-$env:GITHUB_RUN_ID"
+          Write-Host "Trying auth key on hostname $pcName ..."
+          & $ts "up" "--authkey=$k" "--hostname=$pcName" 2>&1 | Out-Host
+          Start-Sleep -Seconds 12
+          $st = & $ts "status" 2>&1 | Out-String
+          if ($st -match 'NeedsLogin|invalid key|Logged out') {
+            Write-Host "  [FAIL] Key kaam nahi kiya -> link mode."
+            "TS_NEED_LINK=true" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          } else {
+            Write-Host "  [OK] Tailscale connected with key."
+            "TS_NEED_LINK=false" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          }
+
+      # ============================================================
+      # 9. CONNECT — LINK MODE (koi key nahi chahiye)
+      # ============================================================
+      - name: '[9/14] Connect Tailscale (login link)'
+        if: env.TS_MODE == 'link' || env.TS_NEED_LINK == 'true'
+        shell: pwsh
+        run: |
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          $pcName = "gh-pc-$env:GITHUB_RUN_ID"
+          $out = "$env:TEMP\ts_out.txt"
+          $err = "$env:TEMP\ts_err.txt"
+          Remove-Item $out,$err -ErrorAction SilentlyContinue
+          Start-Process -FilePath $ts -ArgumentList "up","--hostname=$pcName" `
+            -RedirectStandardOutput $out -RedirectStandardError $err -WindowStyle Hidden -PassThru | Out-Null
+          $link = $null
+          for ($i=0; $i -lt 12; $i++) {
+            Start-Sleep -Seconds 5
+            $log = ""
+            if (Test-Path $out) { $log += (Get-Content $out -Raw -ErrorAction SilentlyContinue) }
+            if (Test-Path $err) { $log += (Get-Content $err -Raw -ErrorAction SilentlyContinue) }
+            $m = [regex]::Match($log, 'https://login\.tailscale\.com/\S+')
+            if ($m.Success) { $link = $m.Value.Trim(); break }
+          }
+          if ($link) {
+            Write-Host "=================================================="
+            Write-Host "  TAILSCALE LOGIN LINK  (5 minute mein expire)"
+            Write-Host ""
+            Write-Host "  $link"            Write-Host ""
+            Write-Host "  Phone ke CHROME mein khol, Google se sign in."
+            Write-Host "=================================================="
+          } else {
+            Write-Host "  [X] Link nahi mila. Key dobara check kar."
+          }
+
+      # ============================================================
+      # 10. TAILSCALE IP
+      # ============================================================
+      - name: '[10/14] Tailscale IP nikaalo'
+        shell: pwsh
+        run: |
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          $ip = $null
+          for ($i=0; $i -lt 12; $i++) {
+            Start-Sleep -Seconds 10
+            $ip = (& $ts "ip" "-4" 2>$null | Select-String -Pattern '^100\.' | Select-Object -First 1)
+            if ($ip) { break }
+          }
+          if ($ip) {
+            $ip = "$ip".Trim()
+            "TS_IP=$ip" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "Tailscale IP: $ip"
+          } else {
+            Write-Host "Tailscale IP nahi mila (login pending?)."
+          }
+
+      # ============================================================
+      # 11. SOFTWARE PACK (NEW — winget se)
+      # ============================================================
+      - name: '[11/14] Software install'
+        if: inputs.software_pack != 'none'
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $pack = "${{ inputs.software_pack }}"
+          $browsers = "${{ inputs.install_browsers }}"
+
+          function Inst($id, $name) {
+            Write-Host "   -> installing $name ..."
+            winget install --id $id -e --accept-source-agreements --accept-package-agreements --silent 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) { Write-Host "   [OK] $name" } else { Write-Host "   [skip] $name (pehle se hai ya fail)" }
+          }
+
+          if ($browsers -eq 'yes') {
+            Inst "Google.Chrome" "Google Chrome"
+            Inst "Mozilla.Firefox" "Mozilla Firefox"
+          }
+
+          if ($pack -in @('essential','all')) {
+            Inst "7zip.7zip" "7-Zip"
+            Inst "VideoLAN.VLC" "VLC Player"
+            Inst "Notepad++.Notepad++" "Notepad++"
+            Inst "voidtools.Everything" "Everything Search"
+            Inst "Microsoft.PowerToys" "PowerToys"
+          }
+
+          if ($pack -in @('dev','all')) {
+            Inst "Microsoft.VisualStudioCode" "VS Code"
+            Inst "Git.Git" "Git"
+            Inst "OpenJS.NodeJS.LTS" "Node.js LTS"
+            Inst "Python.Python.3.12" "Python 3.12"
+            Inst "GitHub.cli" "GitHub CLI"
+            Inst "Docker.DockerDesktop" "Docker Desktop"
+          }
+
+          if ($pack -in @('media','all')) {
+            Inst "Gyan.FFmpeg" "FFmpeg"
+            Inst "OBSProject.OBSStudio" "OBS Studio"
+            Inst "ImageMagick.ImageMagick" "ImageMagick"
+            Inst "Audacity.Audacity" "Audacity"
+            Inst "HandBrake.HandBrake" "HandBrake"
+          }
+
+          if ($pack -in @('gaming','all')) {
+            Inst "Valve.Steam" "Steam"
+            Inst "EpicGames.EpicGamesLauncher" "Epic Games"
+            Inst "Discord.Discord" "Discord"
+          }
+
+          Write-Host "Software pack done."
+
+      # ============================================================
+      # 12. OMNIRUSH — LATEST VERSION AUTO-DETECT (BUG FIX)
+      # ============================================================
+      - name: '[12/14] OmniRush install (latest)'
+        if: inputs.install_omnirush == 'yes'
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Write-Host "OmniRush ka latest version dhoondh rahe hain..."
+          $exe = "$env:USERPROFILE\Desktop\OmniRush.exe"
+          $url = $null
+
+          # Tareeka 1: latest.yml se asli filename nikaalo (electron-builder manifest)
+          try {
+            $yml = Invoke-RestMethod -Uri "https://github.com/omnirush-ai/omnirush-gui/releases/latest/download/latest.yml" -ErrorAction Stop
+            $raw = $yml -join "`n"
+            $m = [regex]::Match($raw, 'url:\s*(\S+\.exe)')
+            $v = [regex]::Match($raw, 'version:\s*(\S+)')
+            if ($m.Success) {
+              $file = $m.Groups[1].Value
+              $ver  = if ($v.Success) { $v.Groups[1].Value } else { "latest" }
+              $url  = "https://github.com/omnirush-ai/omnirush-gui/releases/latest/download/$file"
+              Write-Host "   manifest se mila: $file (version $ver)"
+            }
+          } catch { Write-Host "   manifest read fail" }
+
+          # Tareeka 2: GitHub API se asset list
+          if (-not $url) {
+            try {
+              $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/omnirush-ai/omnirush-gui/releases/latest" -Headers @{ 'User-Agent' = 'gh-actions' } -ErrorAction Stop
+              $asset = $rel.assets | Where-Object { $_.name -like 'omnirush-win-x64-*.exe' } | Select-Object -First 1
+              if ($asset) {
+                $url = $asset.browser_download_url
+                Write-Host "   API se mila: $($asset.name)"
+              }
+            } catch { Write-Host "   API read fail" }
+          }
+
+          # Tareeka 3: purana known-good URL
+          if (-not $url) {
+            $url = "https://github.com/omnirush-ai/omnirush-gui/releases/download/v2.2.17/omnirush-win-x64-2.2.17.exe"
+            Write-Host "   fallback: purana 2.2.17 URL"
+          }
+
+          Write-Host "   downloading: $url"
+          Invoke-WebRequest -Uri $url -OutFile $exe -ErrorAction Stop
+          Write-Host "   OmniRush Desktop par aa gaya."
+
+          Start-Process -FilePath $exe -ArgumentList "/S" -Wait -ErrorAction SilentlyContinue
+          Write-Host "   OmniRush install ho gaya."
+
+          $target = "$env:LOCALAPPDATA\Programs\omnirush\OmniRush.exe"
+          if (-not (Test-Path $target)) {
+            $found = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Filter "OmniRush.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $target = $found.FullName }
+          }
+          if (Test-Path $target) {
+            $w = New-Object -ComObject WScript.Shell
+            $s = $w.CreateShortcut("$env:USERPROFILE\Desktop\OmniRush.lnk")
+            $s.TargetPath = $target
+            $s.Save()
+            Write-Host "   Desktop shortcut ready."
+          }
+
+      # ============================================================
+      # 13. WEB ACCESS — status page + files (NEW)
+      #      Cloudflare tunnel — koi client install nahi karna
+      # ============================================================
+      - name: '[13/14] Browser access (status page + files)'
+        if: inputs.web_access == 'yes'
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $dir = "$env:USERPROFILE\Desktop\WebShare"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+
+          # status + files page
+                    $html = @(
+            '<!DOCTYPE html><html><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<title>Cloud PC</title>'
+            '<style>'
+            '*{box-sizing:border-box;margin:0;padding:0}'
+            'body{background:#0f1115;color:#e6e6ee;font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:18px;max-width:860px;margin:0 auto}'
+            'h1{font-size:22px;margin-bottom:4px}'
+            '.sub{color:#8b8b9c;font-size:12.5px;margin-bottom:16px}'
+            '.card{background:#171a21;border:1px solid #262a34;border-radius:14px;padding:15px;margin-bottom:13px}'
+            '.k{font-size:10.5px;letter-spacing:.14em;color:#7c7c8e;text-transform:uppercase;margin-bottom:5px}'
+            '.v{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:15px;color:#e8b96a;word-break:break-all}'
+            '.row{display:flex;gap:10px;flex-wrap:wrap}'
+            '.row>div{flex:1;min-width:200px}'
+            'a{color:#7ab8ff;text-decoration:none}'
+            'a:hover{text-decoration:underline}'
+            '.note{color:#8b8b9c;font-size:12.5px;line-height:1.7;margin-top:10px}'
+            '</style></head><body>'
+            '<h1>&#9672; Cloud PC</h1>'
+            '<div class="sub">Live status &#183; files &#183; connection info</div>'
+            '<div class="card"><div class="row">'
+            '  <div><div class="k">RDP User</div><div class="v">__USER__</div></div>'
+            '  <div><div class="k">RDP Password</div><div class="v">__PASS__</div></div>'
+            '</div></div>'
+            '<div class="card"><div class="k">RDP Address (Tailscale)</div><div class="v">__IP__:3389</div></div>'
+            '<div class="card"><div class="k">Hours</div><div class="v">__HOURS__ ghante</div></div>'
+            '<div class="card"><div class="k">Desktop Files</div><div id="f">loading...</div></div>'
+            '<div class="note">Ye page tab tak chalta hai jab tak workflow chalu hai.</div>'
+            '<script>'
+            'fetch(''/files.json'').then(function(r){return r.json()}).then(function(d){'
+            '  var h='''';'
+            '  (d.files||[]).forEach(function(f){'
+            '    h += ''<div style="padding:5px 0;border-bottom:1px solid #22252e"><a href="/f/''+encodeURIComponent(f)+''">''+f+''</a></div>'';'
+            '  });'
+            '  document.getElementById(''f'').innerHTML = h || ''<span style="color:#666">koi file nahi</span>'';'
+            '}).catch(function(){ document.getElementById(''f'').textContent=''(file list nahi mili)''; });'
+            '</script>'
+            '</body></html>'
+          ) -join "`n"
+          $html = $html.Replace('__USER__', $env:RDP_USER).Replace('__PASS__', $env:RDP_PASS).Replace('__IP__', $env:TS_IP).Replace('__HOURS__', "${{ inputs.hours }}")          $html | Out-File "$dir\index.html" -Encoding utf8
+
+          # tiny static server (python) — files + json
+                    $py = @(
+            'import http.server, socketserver, json, os, urllib.parse, html'
+            'D = os.path.join(os.path.expanduser("~"), "Desktop", "WebShare")'
+            'class H(http.server.SimpleHTTPRequestHandler):'
+            '    def __init__(self, *a, **k):'
+            '        super().__init__(*a, directory=D, **k)'
+            '    def do_GET(self):'
+            '        p = urllib.parse.urlparse(self.path).path'
+            '        if p == "/files.json":'
+            '            try:'
+            '                files = sorted(os.listdir(D))'
+            '                files = [f for f in files if f != "index.html"]'
+            '            except Exception:'
+            '                files = []'
+            '            body = json.dumps({"files": files}).encode()'
+            '            self.send_response(200)'
+            '            self.send_header("Content-Type", "application/json")'
+            '            self.send_header("Content-Length", str(len(body)))'
+            '            self.end_headers()'
+            '            self.wfile.write(body)'
+            '            return'
+            '        if p.startswith("/f/"):'
+            '            name = urllib.parse.unquote(p[3:])'
+            '            path = os.path.join(D, name)'
+            '            if os.path.isfile(path):'
+            '                self.send_response(200)'
+            '                self.send_header("Content-Type", "application/octet-stream")'
+            '                self.send_header("Content-Disposition", ''attachment; filename="%s"'' % name)'
+            '                self.send_header("Content-Length", str(os.path.getsize(path)))'
+            '                self.end_headers()'
+            '                with open(path, "rb") as fh:'
+            '                    self.wfile.write(fh.read())'
+            '                return'
+            '            self.send_error(404); return'
+            '        if p == "/" or p == "":'
+            '            self.path = "/index.html"'
+            '        return super().do_GET()'
+            '    def log_message(self, *a):'
+            '        pass'
+            'socketserver.TCPServer.allow_reuse_address = True'
+            'with socketserver.ThreadingTCPServer(("127.0.0.1", 8099), H) as httpd:'
+            '    httpd.serve_forever()'
+          ) -join "`n"
+          $py | Out-File "$env:TEMP\srv.py" -Encoding utf8
+          Start-Process -FilePath "python" -ArgumentList "$env:TEMP\srv.py" -WindowStyle Hidden -PassThru | Out-Null
+          Start-Sleep -Seconds 3
+
+          # cloudflared quick tunnel
+          $cf = "$env:TEMP\cloudflared.exe"
+          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile $cf
+          $cfOut = "$env:TEMP\cf.log"
+          Start-Process -FilePath $cf -ArgumentList "tunnel","--url","http://127.0.0.1:8099","--no-autoupdate" `
+            -RedirectStandardOutput $cfOut -RedirectStandardError $cfOut -WindowStyle Hidden -PassThru | Out-Null
+
+          $link = $null
+          for ($i=0; $i -lt 20; $i++) {
+            Start-Sleep -Seconds 4
+            if (Test-Path $cfOut) {
+              $t = Get-Content $cfOut -Raw -ErrorAction SilentlyContinue
+              $m = [regex]::Match($t, 'https://[a-z0-9\-]+\.trycloudflare\.com')
+              if ($m.Success) { $link = $m.Value; break }
+            }
+          }
+          if ($link) {
+            "CF_LINK=$link" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "=================================================="
+            Write-Host "  BROWSER ACCESS LINK (koi client nahi chahiye)"
+            Write-Host ""
+            Write-Host "  $link"
+            Write-Host ""
+            Write-Host "  Phone/PC ke browser mein khol — status + files."
+            Write-Host "=================================================="
+          } else {
+            Write-Host "  [X] Cloudflare tunnel nahi bana."
+          }
+
+      # ============================================================
+      # 13b. OPTIONAL FILE DOWNLOAD
+      # ============================================================
+      - name: '[13b/14] Apni file Desktop pe'
+        if: inputs.file_url != ''
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $url = "${{ inputs.file_url }}"
+          if ($url -and $url.StartsWith("http")) {
+            $dest = Join-Path "$env:USERPROFILE\Desktop" ([System.IO.Path]::GetFileName($url))
+            Invoke-WebRequest -Uri $url -OutFile $dest
+            Write-Host "Downloaded: $dest"
+          }
+
+      # ============================================================
+      # 14. CONNECTION DETAILS + ARTIFACT
+      # ============================================================
+      - name: '[14/14] CONNECTION DETAILS'
+        shell: pwsh
+        run: |
+          $ip = $env:TS_IP
+          $cf = $env:CF_LINK
+          Write-Host ""
+          Write-Host "=========================================================="
+          Write-Host "        TERRA PC TAIYAAR HAI  -  ${{ inputs.hours }} HOURS"
+          Write-Host "=========================================================="
+          Write-Host ""
+          Write-Host "   USER     : $env:RDP_USER"
+          Write-Host "   PASSWORD : $env:RDP_PASS"
+          Write-Host ""
+          if ($ip) {
+            Write-Host "   ---- TARIKA 1: Tailscale RDP ----"
+            Write-Host "   ADDRESS  : ${ip}:3389"
+            Write-Host "   (Tailscale app ON + RD Client app)"
+            Write-Host ""
+          }
+          if ($cf) {
+            Write-Host "   ---- TARIKA 2: Browser (koi client nahi) ----"
+            Write-Host "   $cf"
+            Write-Host ""
+          }
+          Write-Host "   Desktop pe OmniRush + software ready hain."
+          Write-Host "=========================================================="
+          Write-Host ""
+
+          # artifact ke liye file
+          $out = "$env:RUNNER_TEMP\CONNECT.txt"
+                    $txt = @(
+            "CLOUD PC - CONNECTION DETAILS"
+            "============================="
+            "TIME      : ${{ inputs.hours }} hours"
+            "USER      : $env:RDP_USER"
+            "PASSWORD  : $env:RDP_PASS"
+            "TS_IP     : $ip"
+            "RDP       : ${ip}:3389"
+            "WEB       : $cf"
+          ) -join "`n"
+          $txt | Out-File $out -Encoding utf8
+
+      - name: Save connection details
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloud-pc-connection
+          path: ${{ runner.temp }}\CONNECT.txt
+
+      # ============================================================
+      # 15. KEEP ALIVE + LIVE COUNTDOWN
+      # ============================================================
+      - name: Keep PC alive
+        shell: pwsh
+        run: |
+          $hours = [int]"${{ inputs.hours }}"
+          $endAt = (Get-Date).AddHours($hours)
+          $ts    = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          Write-Host "PC chalega $hours ghante. Band hoga: $endAt"
+          $n = 0
+          while ((Get-Date) -lt $endAt) {
+            Start-Sleep -Seconds 60
+            $n++
+            if ($n % 5 -eq 0) {
+              $left = $endAt - (Get-Date)
+              $ip = (& $ts "ip" "-4" 2>$null | Select-String -Pattern '^100\.' | Select-Object -First 1)
+              if ($ip) { $ip = "$ip".Trim() }
+              $hh = [math]::Floor($left.TotalHours)
+              $mm = $left.Minutes
+              Write-Host "[alive $hh h $mm m bache] IP: $ip | user: $env:RDP_USER | pass: $env:RDP_PASS"
+            }
+          }
+          Write-Host "Time khatam. Band ho raha hai."
+
+  # ============================================================
+  #  JOB 2 — WINUX (Linux jo Windows 11 jaisa dikhe)
+  # ============================================================
+  winux:
+    if: inputs.os == 'winux'
+    name: Winux Cloud PC
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      THEME:      ${{ inputs.theme }}
+      WALL:       ${{ inputs.wallpaper }}
+      RES:        ${{ inputs.resolution }}
+      PACK:       ${{ inputs.software_pack }}
+      WINE:       ${{ inputs.install_wine }}
+      HOURS:      ${{ inputs.hours }}
+      BROWSER:    ${{ inputs.browser_access }}
+      AUTH_MODE:  ${{ inputs.auth_mode }}
+
+    steps:
+      # ============================================================
+      # 1. Machine info + password
+      # ============================================================
+      - name: '[1/12] Machine info + password'
+        shell: bash
+        run: |
+          echo "=== WINUX CLOUD PC ==="          df -h / | tail -1
+          lsb_release -d 2>/dev/null || cat /etc/os-release | grep PRETTY
+
+          # password
+          PW="${{ inputs.pc_password }}"
+          if [ -z "$PW" ]; then
+            PW=$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 12)
+          fi
+          echo "$PW" > /tmp/PW
+          echo "runner:$PW" | sudo chpasswd
+          echo "PW_LEN=${#PW}"
+          echo "PC_PASSWORD=$PW" >> $GITHUB_ENV
+          echo "PC_USER=runner"  >> $GITHUB_ENV
+
+      # ============================================================
+      # 2. XFCE desktop + XRDP
+      # ============================================================
+      - name: '[2/12] XFCE + XRDP install'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          # ZAROORI (ye fail hone nahi chahiye)
+          sudo apt-get install -y -qq \
+            xfce4 xfce4-goodies xfce4-terminal \
+            xrdp xorgxrdp dbus-x11 \
+            xvfb x11vnc novnc websockify \
+            curl wget git unzip
+          # OPTIONAL (fail ho to koi baat nahi)
+          sudo apt-get install -y -qq fonts-noto 2>/dev/null || true
+          sudo apt-get install -y -qq fonts-inter 2>/dev/null || true
+          sudo apt-get install -y -qq xfce4-whiskermenu-plugin 2>/dev/null || true
+          sudo apt-get install -y -qq xfce4-statusnotifier-plugin 2>/dev/null || true
+          sudo apt-get install -y -qq imagemagick 2>/dev/null || true
+          # headless ke liye zaroori
+          echo "allowed_users=anybody" | sudo tee /etc/X11/Xwrapper.config > /dev/null
+          sudo adduser xrdp ssl-cert 2>/dev/null || true
+          echo "exec startxfce4" > "$HOME/.xsession"
+          chmod +x "$HOME/.xsession"
+          sudo systemctl enable xrdp
+          sudo systemctl restart xrdp
+          sleep 3
+          sudo systemctl is-active xrdp || (sudo xrdp -nodaemon & sleep 3)
+          echo "XRDP ready"
+
+      # ============================================================
+      # 3. WINDOWS 11 THEME
+      # ============================================================
+      - name: '[3/12] Windows theme lagao'
+        shell: bash
+        continue-on-error: true
+        run: |
+          if [ "$THEME" = "plain" ]; then
+            echo "plain mode — theme skip"; exit 0
+          fi
+          sudo apt-get install -y -qq sassc gtk2-engines-murrine libglib2.0-dev-bin 2>/dev/null || true
+          cd /tmp
+
+          if [ "$THEME" = "win11" ]; then
+            echo "--- Win11 GTK theme ---"
+            git clone --depth 1 https://github.com/yeyushengfan258/Win11-gtk-theme.git 2>/dev/null || true
+            if [ -d Win11-gtk-theme ]; then
+              cd Win11-gtk-theme
+              # dark + rounded windows, Windows start icon
+              sudo ./install.sh -c dark --tweaks round -i default 2>&1 | tail -5
+              cd /tmp
+            fi
+            echo "--- Win11 icons ---"
+            git clone --depth 1 https://github.com/yeyushengfan258/Win11-icon-theme.git 2>/dev/null || true
+            if [ -d Win11-icon-theme ]; then
+              cd Win11-icon-theme && sudo ./install.sh 2>&1 | tail -3; cd /tmp
+            fi
+            echo "--- Win11 cursor ---"
+            git clone --depth 1 https://github.com/yeyushengfan258/Win11-cursor.git 2>/dev/null || true
+            if [ -d Win11-cursor ]; then
+              cd Win11-cursor && sudo ./install.sh 2>&1 | tail -3; cd /tmp
+            fi
+            GTK_THEME_NAME="Win11-dark"
+            ICON_THEME_NAME="Win11"
+            CURSOR_THEME="Win11"
+          else
+            echo "--- Windows 10 theme (B00merang) ---"
+            git clone --depth 1 https://github.com/B00merang-Project/Windows-10.git 2>/dev/null || true
+            if [ -d Windows-10 ]; then
+              mkdir -p ~/.themes ~/.icons
+              cp -r Windows-10/* ~/.themes/ 2>/dev/null || true
+              cp -r Windows-10-Icons/* ~/.icons/ 2>/dev/null || true
+            fi
+            GTK_THEME_NAME="Windows10Dark"
+            ICON_THEME_NAME="Windows-10-Icons"
+            CURSOR_THEME="DMZ-White"
+          fi
+
+          # ---- XFCE settings ----
+          mkdir -p ~/.config/xfce4/xfconf/xfce-perchannel-xml
+
+          # GTK theme + icons + cursor + font
+          xfconf-query -c xsettings -p /Net/ThemeName       -s "$GTK_THEME_NAME" --create -t string 2>/dev/null || true
+          xfconf-query -c xsettings -p /Net/IconThemeName   -s "$ICON_THEME_NAME" --create -t string 2>/dev/null || true
+          xfconf-query -c xsettings -p /Gtk/CursorThemeName -s "$CURSOR_THEME"    --create -t string 2>/dev/null || true
+          xfconf-query -c xsettings -p /Gtk/FontName        -s "Inter 10"          --create -t string 2>/dev/null || true
+          xfconf-query -c xsettings -p /Gtk/DecorationLayout -s "menu:minimize,maximize,close" --create -t string 2>/dev/null || true
+          xfconf-query -c xsettings -p /Net/EnableEventSounds -s false --create -t bool 2>/dev/null || true
+
+          # window manager theme
+          xfconf-query -c xfwm4 -p /general/theme       -s "$GTK_THEME_NAME" --create -t string 2>/dev/null || true
+          xfconf-query -c xfwm4 -p /general/title_font  -s "Inter Bold 10"   --create -t string 2>/dev/null || true
+          xfconf-query -c xfwm4 -p /general/button_layout -s "O|HMC"         --create -t string 2>/dev/null || true
+
+          # ---- DIRECT XML FALLBACK (headless pe xfconf-query fail ho sakta hai) ----
+          XD="$HOME/.config/xfce4/xfconf/xfce-perchannel-xml"
+          mkdir -p "$XD"
+          printf '%s\n' \
+            '<?xml version="1.0" encoding="UTF-8"?>' \
+            '<channel name="xsettings" version="1.0">' \
+            '  <property name="Net" type="empty">' \
+            '    <property name="ThemeName" type="string" value="$GTK_THEME_NAME"/>' \
+            '    <property name="IconThemeName" type="string" value="$ICON_THEME_NAME"/>' \
+            '    <property name="EnableEventSounds" type="bool" value="false"/>' \
+            '  </property>' \
+            '  <property name="Gtk" type="empty">' \
+            '    <property name="CursorThemeName" type="string" value="$CURSOR_THEME"/>' \
+            '    <property name="FontName" type="string" value="Sans 10"/>' \
+            '  </property>' \
+            '</channel>' \
+            > "$XD/xsettings.xml"
+          printf '%s\n' \
+            '<?xml version="1.0" encoding="UTF-8"?>' \
+            '<channel name="xfwm4" version="1.0">' \
+            '  <property name="general" type="empty">' \
+            '    <property name="theme" type="string" value="$GTK_THEME_NAME"/>' \
+            '    <property name="button_layout" type="string" value="O|HMC"/>' \
+            '    <property name="workspace_count" type="int" value="1"/>' \
+            '  </property>' \
+            '</channel>' \
+            > "$XD/xfwm4.xml"
+          echo "theme done: $GTK_THEME_NAME / $ICON_THEME_NAME (xml + xfconf dono)"
+
+      # ============================================================
+      # 4. WINDOWS 11 TASKBAR (bottom + centered)
+      # ============================================================
+      - name: '[4/12] Windows jaisa taskbar'
+        shell: bash
+        continue-on-error: true
+        run: |
+          # panel: bottom, full width, 42px, transparent-ish
+          xfconf-query -c xfce4-panel -p /panels/panel-1/position        -s "p=6;x=0;y=0" --create -t string 2>/dev/null || true
+          xfconf-query -c xfce4-panel -p /panels/panel-1/length          -s 100 --create -t int    2>/dev/null || true
+          xfconf-query -c xfce4-panel -p /panels/panel-1/size            -s 42  --create -t int    2>/dev/null || true
+          xfconf-query -c xfce4-panel -p /panels/panel-1/background-style -s 1  --create -t int    2>/dev/null || true
+          xfconf-query -c xfce4-panel -p /panels/panel-1/enter-opacity   -s 92  --create -t int    2>/dev/null || true
+
+          # plugin 1: Start menu (whisker) — Windows logo, no title
+          xfconf-query -c xfce4-panel -p /plugins/plugin-1 -s "whiskermenu" --create -t string 2>/dev/null || true
+          xfconf-query -c xfce4-panel -p /plugins/plugin-1/show-button-title -s false --create -t bool 2>/dev/null || true
+          xfconf-query -c xfce4-panel -p /plugins/plugin-1/button-icon -s "/usr/share/icons/Win11/256x256/places/start-here.png" --create -t string 2>/dev/null || true
+
+          # plugin 2: expanding separator (icons ko center karta hai)
+          xfconf-query -c xfce4-panel -p /plugins/plugin-2 -s "separator" --create -t string 2>/dev/null || true
+          xfconf-query -c xfce4-panel -p /plugins/plugin-2/expand -s true --create -t bool 2>/dev/null || true
+          xfconf-query -c xfce4-panel -p /plugins/plugin-2/style  -s 0    --create -t int   2>/dev/null || true
+
+          # plugin 3: tasklist (Windows jaisa — sirf icons)
+          xfconf-query -c xfce4-panel -p /plugins/plugin-3 -s "tasklist" --create -t string 2>/dev/null || true
+          xfconf-query -c xfce4-panel -p /plugins/plugin-3/show-labels      -s false --create -t bool 2>/dev/null || true
+          xfconf-query -c xfce4-panel -p /plugins/plugin-3/grouping         -s 1     --create -t int   2>/dev/null || true
+          xfconf-query -c xfce4-panel -p /plugins/plugin-3/flat-buttons     -s true  --create -t bool 2>/dev/null || true
+          xfconf-query -c xfce4-panel -p /plugins/plugin-3/show-handle      -s false --create -t bool 2>/dev/null || true
+          xfconf-query -c xfce4-panel -p /plugins/plugin-3/include-all-workspaces -s false --create -t bool 2>/dev/null || true
+
+          # plugin 4: expanding separator
+          xfconf-query -c xfce4-panel -p /plugins/plugin-4 -s "separator" --create -t string 2>/dev/null || true
+          xfconf-query -c xfce4-panel -p /plugins/plugin-4/expand -s true --create -t bool 2>/dev/null || true
+          xfconf-query -c xfce4-panel -p /plugins/plugin-4/style  -s 0    --create -t int   2>/dev/null || true
+
+          # plugin 5: systray
+          xfconf-query -c xfce4-panel -p /plugins/plugin-5 -s "systray" --create -t string 2>/dev/null || true
+
+          # plugin 6: clock (Windows format)
+          xfconf-query -c xfce4-panel -p /plugins/plugin-6 -s "clock" --create -t string 2>/dev/null || true
+          xfconf-query -c xfce4-panel -p /plugins/plugin-6/digital-format -s "%H:%M%n%d/%m/%Y" --create -t string 2>/dev/null || true
+          xfconf-query -c xfce4-panel -p /plugins/plugin-6/tooltip-format  -s "%A, %d %B %Y" --create -t string 2>/dev/null || true
+
+          # plugin list set karo
+          xfconf-query -c xfce4-panel -p /panels/panel-1/plugin-ids \
+            -t int -s 1 -t int -s 2 -t int -s 3 -t int -s 4 -t int -s 5 -t int -s 6 --force-array 2>/dev/null || true
+
+          echo "taskbar done (bottom, centered)"
+
+      # ============================================================
+      # 5. WALLPAPER
+      # ============================================================
+      - name: '[5/12] Windows wallpaper'
+        if: inputs.wallpaper == 'yes'
+        shell: bash
+        continue-on-error: true
+        run: |
+          mkdir -p ~/Pictures
+          # Windows 11 jaisa gradient wallpaper (koi external image nahi)
+          which convert >/dev/null 2>&1 || sudo apt-get install -y -qq imagemagick 2>/dev/null || true
+          if which convert >/dev/null 2>&1; then            convert -size 1920x1080 gradient:'#0b2a4a-#1b4f8a' \
+              -swirl 180 -blur 0x8 -quality 95 ~/Pictures/win11.png 2>/dev/null || \
+            convert -size 1920x1080 gradient:'#0b2a4a-#1b4f8a' ~/Pictures/win11.png 2>/dev/null || true
+          fi
+          if [ -f ~/Pictures/win11.png ]; then
+            xfconf-query -c xfce4-desktop -p /backdrop/screen0/monitor0/image-path -s "$HOME/Pictures/win11.png" --create -t string 2>/dev/null || true
+            xfconf-query -c xfce4-desktop -p /backdrop/screen0/monitor0/image-style -s 5 --create -t int 2>/dev/null || true
+            echo "wallpaper set"
+          fi
+
+      # ============================================================
+      # 6. SOFTWARE
+      # ============================================================
+      - name: '[6/12] Software install'
+        shell: bash
+        continue-on-error: true
+        run: |
+          sudo apt-get update -qq
+
+          if [ "$PACK" = "essential" ] || [ "$PACK" = "all" ]; then
+            echo "--- essential ---"
+            # Chrome
+            wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+            sudo apt-get install -y -qq /tmp/chrome.deb 2>&1 | tail -2 || true
+            sudo apt-get install -y -qq p7zip-full vlc gedit file-roller 2>&1 | tail -2 || true
+          fi
+
+          if [ "$PACK" = "dev" ] || [ "$PACK" = "all" ]; then
+            echo "--- dev ---"
+            # VS Code
+            wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /tmp/ms.gpg
+            sudo install -o root -g root -m 644 /tmp/ms.gpg /etc/apt/trusted.gpg.d/
+            echo "deb [arch=amd64] https://packages.microsoft.com/repos/code stable main" | sudo tee /etc/apt/sources.list.d/vscode.list > /dev/null
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq code 2>&1 | tail -2 || true
+            sudo apt-get install -y -qq python3-pip nodejs npm ffmpeg 2>&1 | tail -2 || true
+          fi
+
+          if [ "$PACK" = "media" ] || [ "$PACK" = "all" ]; then
+            echo "--- media ---"
+            sudo apt-get install -y -qq ffmpeg vlc gimp audacity obs-studio imagemagick handbrake 2>&1 | tail -2 || true
+          fi
+
+          echo "software done"
+
+      # ============================================================
+      # 7. WINE (.exe chalane ke liye)
+      # ============================================================
+      - name: '[7/12] Wine install (.exe chalega)'
+        if: inputs.install_wine == 'yes'
+        shell: bash
+        continue-on-error: true
+        run: |
+          sudo dpkg --add-architecture i386 2>/dev/null || true
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq wine64 wine32 2>&1 | tail -3 || \
+            sudo apt-get install -y -qq wine64 2>&1 | tail -3 || true
+          wine --version 2>/dev/null || echo "wine optional — skip"
+
+      # ============================================================
+      # 8. VIRTUAL DISPLAY + noVNC (browser access)
+      # ============================================================
+      - name: '[8/12] Virtual display + noVNC'
+        shell: bash
+        continue-on-error: true
+        run: |
+          RES="${{ inputs.resolution }}"
+          W=$(echo $RES | cut -d'x' -f1); H=$(echo $RES | cut -d'x' -f2)
+          echo "display: ${W}x${H}"
+
+          rm -rf /tmp/.X99-lock
+          nohup Xvfb :99 -screen 0 ${W}x${H}x24 -ac +extension GLX +render -noreset > /tmp/xvfb.log 2>&1 &
+          sleep 4
+
+          export DISPLAY=:99
+          nohup startxfce4 > /tmp/xfce.log 2>&1 &
+          sleep 8
+
+          # VNC server on the virtual display
+          nohup x11vnc -display :99 -forever -shared -nopw -rfbport 5900 -quiet > /tmp/x11vnc.log 2>&1 &
+          sleep 3
+
+          # noVNC (browser se)
+          nohup websockify --web=/usr/share/novnc 6080 localhost:5900 > /tmp/novnc.log 2>&1 &
+          sleep 3
+
+          echo "display + novnc ready on :99"
+
+      # ============================================================
+      # 9. TAILSCALE
+      # ============================================================
+      - name: '[9/12] Tailscale install'
+        shell: bash
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh 2>&1 | tail -3
+          echo "tailscale installed"
+
+      - name: '[9b/12] Tailscale key check'
+        shell: bash
+        run: |
+          K="${{ secrets.TAILSCALE_AUTH_KEY }}"
+          MODE="${{ inputs.auth_mode }}"
+          echo "=========================================="
+          echo "  TAILSCALE KEY CHECK"
+          echo "=========================================="
+          if [ -z "$K" ]; then
+            echo "  [!] TAILSCALE_AUTH_KEY secret KHALI hai -> link mode"
+            echo "TS_MODE=link" >> $GITHUB_ENV
+          elif ! echo "$K" | grep -q '^tskey-auth-'; then
+            echo "  [!] GALAT KEY TYPE (tskey-api- nahi chalega) -> link mode"
+            echo "TS_MODE=link" >> $GITHUB_ENV
+          elif [ ${#K} -lt 30 ]; then
+            echo "  [!] Key adhura hai -> link mode"
+            echo "TS_MODE=link" >> $GITHUB_ENV
+          elif [ "$MODE" = "link" ]; then
+            echo "TS_MODE=link" >> $GITHUB_ENV
+          else
+            echo "  [OK] Key format sahi hai"
+            echo "TS_MODE=key" >> $GITHUB_ENV
+          fi
+          echo "=========================================="
+
+      - name: '[9c/12] Connect Tailscale (key)'
+        if: env.TS_MODE == 'key'
+        shell: bash
+        run: |
+          sudo tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="winux-$GITHUB_RUN_ID" --accept-routes 2>&1 | tail -5 || true
+          sleep 10
+          if sudo tailscale status 2>&1 | grep -qi 'Logged out\|NeedsLogin'; then
+            echo "  [FAIL] key kaam nahi kiya"
+            echo "TS_NEED_LINK=true" >> $GITHUB_ENV
+          else
+            echo "  [OK] connected"
+            echo "TS_NEED_LINK=false" >> $GITHUB_ENV
+          fi
+
+      - name: '[9d/12] Connect Tailscale (login link)'
+        if: env.TS_MODE == 'link' || env.TS_NEED_LINK == 'true'
+        shell: bash
+        run: |
+          sudo tailscale up --hostname="winux-$GITHUB_RUN_ID" > /tmp/ts.log 2>&1 &
+          sleep 20
+          LINK=$(grep -o 'https://login.tailscale.com/[^ ]*' /tmp/ts.log | head -1)
+          if [ -n "$LINK" ]; then
+            echo "=================================================="
+            echo "  TAILSCALE LOGIN LINK (5 min mein expire)"
+            echo ""
+            echo "  $LINK"
+            echo ""
+            echo "  Phone ke CHROME mein khol, Google se sign in."
+            echo "=================================================="
+          else
+            echo "  [X] link nahi mila"
+            cat /tmp/ts.log | head -10
+          fi
+
+      - name: '[9e/12] Tailscale IP'
+        shell: bash
+        run: |
+          IP=""
+          for i in $(seq 1 12); do
+            IP=$(sudo tailscale ip -4 2>/dev/null | grep '^100\.' | head -1)
+            [ -n "$IP" ] && break
+            sleep 8
+          done
+          if [ -n "$IP" ]; then
+            echo "TS_IP=$IP" >> $GITHUB_ENV
+            echo "Tailscale IP: $IP"
+          else
+            echo "IP nahi mila (login pending?)"
+          fi
+
+      # ============================================================
+      # 10. BROWSER ACCESS — Cloudflare tunnel
+      # ============================================================
+      - name: '[10/12] Browser access link'
+        if: inputs.browser_access == 'yes'
+        shell: bash
+        continue-on-error: true
+        run: |
+          wget -q -O /tmp/cf https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 || \
+            curl -sL -o /tmp/cf https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x /tmp/cf
+          nohup /tmp/cf tunnel --url http://127.0.0.1:6080 --no-autoupdate > /tmp/cf.log 2>&1 &
+          LINK=""
+          for i in $(seq 1 20); do
+            sleep 4
+            LINK=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' /tmp/cf.log | head -1)
+            [ -n "$LINK" ] && break
+          done
+          if [ -n "$LINK" ]; then
+            echo "CF_LINK=$LINK" >> $GITHUB_ENV
+            echo "=================================================="
+            echo "  BROWSER ACCESS (koi client nahi chahiye)"
+            echo ""
+            echo "  $LINK/vnc.html?autoconnect=true&resize=scale"
+            echo ""
+            echo "  Phone/PC ke browser mein khol -> desktop dikhega"
+            echo "=================================================="
+          else            echo "  [X] tunnel nahi bana"
+            tail -5 /tmp/cf.log
+          fi
+
+      # ============================================================
+      # 11. CONNECTION DETAILS
+      # ============================================================
+      - name: '[11/12] CONNECTION DETAILS'
+        shell: bash
+        run: |
+          PW=$(cat /tmp/PW 2>/dev/null || echo "$PC_PASSWORD")
+          echo ""
+          echo "=========================================================="
+          echo "        WINUX PC TAIYAAR HAI  -  ${{ inputs.hours }} HOURS"
+          echo "=========================================================="
+          echo ""
+          echo "   USER     : runner"
+          echo "   PASSWORD : $PW"
+          echo ""
+          if [ -n "$TS_IP" ]; then
+            echo "   ---- TARIKA 1: RDP (Tailscale) ----"
+            echo "   ADDRESS  : ${TS_IP}:3389"
+            echo "   (Tailscale app ON + RD Client app)"
+            echo ""
+          fi
+          if [ -n "$CF_LINK" ]; then
+            echo "   ---- TARIKA 2: BROWSER (koi client nahi) ----"
+            echo "   ${CF_LINK}/vnc.html?autoconnect=true&resize=scale"
+            echo ""
+          fi
+          echo "   Theme : ${{ inputs.theme }}   Screen: ${{ inputs.resolution }}"
+          echo "=========================================================="
+          echo ""
+
+          {
+            echo "WINUX CLOUD PC"
+            echo "=============="
+            echo "TIME     : ${{ inputs.hours }} hours"
+            echo "USER     : runner"
+            echo "PASSWORD : $PW"
+            echo "RDP      : ${TS_IP}:3389"
+            echo "BROWSER  : ${CF_LINK}/vnc.html?autoconnect=true&resize=scale"
+            echo "THEME    : ${{ inputs.theme }}"
+          } > /tmp/CONNECT.txt
+
+      - name: Save connection details
+        uses: actions/upload-artifact@v4
+        with:
+          name: winux-connection
+          path: /tmp/CONNECT.txt
+
+      # ============================================================
+      # 12. KEEP ALIVE + LIVE COUNTDOWN
+      # ============================================================
+      - name: '[12/12] Keep PC alive'
+        shell: bash
+        run: |
+          HOURS="${{ inputs.hours }}"
+          END=$(( $(date +%s) + HOURS * 3600 ))
+          echo "PC chalega $HOURS ghante. Band hoga: $(date -d @$END)"
+          N=0
+          while [ $(date +%s) -lt $END ]; do
+            sleep 60
+            N=$((N+1))
+            if [ $((N % 5)) -eq 0 ]; then
+              LEFT=$(( END - $(date +%s) ))
+              LH=$(( LEFT / 3600 )); LM=$(( (LEFT % 3600) / 60 ))
+              IP=$(sudo tailscale ip -4 2>/dev/null | grep '^100\.' | head -1)
+              PW=$(cat /tmp/PW 2>/dev/null)
+              echo "[alive ${LH}h ${LM}m bache] IP: $IP | user: runner | pass: $PW"
+            fi
+          done
+          echo "Time khatam. Band ho raha hai."
+          
+          nproc
+          free -h | head -2

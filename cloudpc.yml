@@ -197,7 +197,8 @@ jobs:
       # ============================================================
       - name: '[2/14] RDP user banao'
         shell: pwsh
-        run: |          $p = "${{ inputs.rdp_password }}".Trim()
+        run: |
+          $p = "${{ inputs.rdp_password }}".Trim()
           if ($p.Length -lt 10) {
             $U = 'ABCDEFGHJKLMNPQRSTUVWXYZ'.ToCharArray()
             $L = 'abcdefghijkmnpqrstuvwxyz'.ToCharArray()
@@ -396,7 +397,8 @@ jobs:
             if ($m.Success) { $link = $m.Value.Trim(); break }
           }
           if ($link) {
-            Write-Host "=================================================="            Write-Host "  TAILSCALE LOGIN LINK  (5 minute mein expire)"
+            Write-Host "=================================================="
+            Write-Host "  TAILSCALE LOGIN LINK  (5 minute mein expire)"
             Write-Host ""
             Write-Host "  $link"
             Write-Host ""
@@ -595,7 +597,8 @@ jobs:
             '  });'
             '  document.getElementById(''f'').innerHTML = h || ''<span style="color:#666">koi file nahi</span>'';'
             '}).catch(function(){ document.getElementById(''f'').textContent=''(file list nahi mili)''; });'
-            '</script>'            '</body></html>'
+            '</script>'
+            '</body></html>'
           ) -join "`n"
           $html = $html.Replace('__USER__', $env:RDP_USER).Replace('__PASS__', $env:RDP_PASS).Replace('__IP__', $env:TS_IP).Replace('__HOURS__', "${{ inputs.hours }}")
           $html | Out-File "$dir\index.html" -Encoding utf8
@@ -794,7 +797,8 @@ jobs:
           PW="${{ inputs.pc_password }}"
           if [ -z "$PW" ]; then
             PW=$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 12)
-          fi          echo "$PW" > /tmp/PW
+          fi
+          echo "$PW" > /tmp/PW
           echo "runner:$PW" | sudo chpasswd
           echo "PC_USER=runner" >> $GITHUB_ENV
           echo "PC_PASSWORD=$PW" >> $GITHUB_ENV
@@ -993,7 +997,8 @@ jobs:
           mkdir -p "$XD"
           printf '%s\n' \
             '<?xml version="1.0" encoding="UTF-8"?>' \
-            '<channel name="xfce4-panel" version="1.0">' \            '  <property name="panels" type="array">' \
+            '<channel name="xfce4-panel" version="1.0">' \
+            '  <property name="panels" type="array">' \
             '    <value type="int" value="1"/>' \
             '  </property>' \
             '  <property name="panels-dark-mode" type="bool" value="true"/>' \
@@ -1192,7 +1197,8 @@ jobs:
             sudo apt-get install -y -qq ffmpeg gimp audacity handbrake 2>&1 | tail -2
           fi
           echo "software done"
-                - name: '[10b/13] Wine (.exe chalega)'
+
+      - name: '[10b/13] Wine (.exe chalega)'
         if: inputs.install_wine == 'yes'
         shell: bash
         continue-on-error: true
@@ -1347,4 +1353,3 @@ jobs:
             fi
           done
           echo "Time khatam."
-          

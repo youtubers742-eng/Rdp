@@ -4,13 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       os:
-        description: 'Kaunsa OS chahiye'
+        description: 'Kaunsa chahiye'
         required: true
         default: 'linux'
         type: choice
         options:
           - 'linux'
           - 'windows11'
+          - 'android'
       hours:
         description: 'Kitne ghante chalega (1-5)'
         required: true
@@ -23,7 +24,7 @@ on:
           - '4'
           - '5'
       screen:
-        description: 'Screen size'
+        description: 'Linux screen size'
         required: true
         default: '1366x768'
         type: choice
@@ -32,16 +33,26 @@ on:
           - '1366x768'
           - '1600x900'
           - '1920x1080'
+      atype:
+        description: 'Android screen - tablet ya phone'
+        required: true
+        default: 'tablet-1280x800'
+        type: choice
+        options:
+          - 'tablet-1280x800'
+          - 'tablet-1600x1000'
+          - 'phone-720x1280'
+          - 'phone-1080x1920'
       web:
-        description: 'Browser me desktop (noVNC link)'
+        description: 'Browser me desktop kholo'
         required: true
         default: 'yes'
         type: choice
         options:
           - 'yes'
           - 'no'
-      chrome:
-        description: 'Google Chrome bhi install kare'
+      extras:
+        description: 'Linux me extra apps (VLC, GIMP, Office, VS Code)'
         required: true
         default: 'yes'
         type: choice
@@ -65,7 +76,7 @@ jobs:
           echo "  Screen : ${{ inputs.screen }}"
           echo "  Time   : ${{ inputs.hours }} ghante"
           echo "  Web    : ${{ inputs.web }}"
-          echo "  Chrome : ${{ inputs.chrome }}"
+          echo "  Extras : ${{ inputs.extras }}"
           echo "=============================================="
           echo "RES=${{ inputs.screen }}" >> $GITHUB_ENV
           echo "WEB=${{ inputs.web }}" >> $GITHUB_ENV
@@ -120,12 +131,10 @@ jobs:
             fi
           fi
           echo "--- Chrome ---"
-          if [ "${{ inputs.chrome }}" = "yes" ]; then
-            wget -q --timeout=150 --tries=2 -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-            if [ -s /tmp/chrome.deb ]; then
-              sudo apt-get install -y /tmp/chrome.deb 2>&1 | tail -3
-              sudo apt-get install -y -f 2>&1 | tail -2
-            fi
+          wget -q --timeout=150 --tries=2 -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          if [ -s /tmp/chrome.deb ]; then
+            sudo apt-get install -y /tmp/chrome.deb 2>&1 | tail -3
+            sudo apt-get install -y -f 2>&1 | tail -2
           fi
           patchde() {
             F="$1"
@@ -139,7 +148,38 @@ jobs:
           command -v firefox > /dev/null 2>&1 && echo "[OK] firefox installed" || echo "[FAIL] firefox nahi mila"
           command -v google-chrome > /dev/null 2>&1 && echo "[OK] chrome installed" || echo "[WARN] chrome nahi mila"
 
-      - name: '4 Desktop look'
+      - name: '4 Extra apps'
+        shell: bash
+        run: |
+          set +e
+          if [ "${{ inputs.extras }}" = "yes" ]; then
+            sudo apt-get install -y vlc gimp libreoffice-writer libreoffice-calc 2>&1 | tail -3
+            sudo apt-get install -y telegram-desktop qbittorrent filezilla 2>&1 | tail -3
+            sudo apt-get install -y htop neofetch p7zip-full unrar-free 2>&1 | tail -3
+            sudo install -d -m 0755 /etc/apt/keyrings
+            wget -q --timeout=60 --tries=2 https://packages.microsoft.com/keys/microsoft.asc -O /tmp/ms.asc
+            if [ -s /tmp/ms.asc ]; then
+              sudo cp /tmp/ms.asc /etc/apt/keyrings/microsoft.gpg
+              echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/code stable main' > /tmp/vscode.list
+              sudo cp /tmp/vscode.list /etc/apt/sources.list.d/vscode.list
+              sudo apt-get update -y 2>&1 | tail -2
+              sudo apt-get install -y code 2>&1 | tail -3
+            fi
+          fi
+          mkdir -p ~/Desktop
+          for a in firefox google-chrome gimp vlc libreoffice-writer libreoffice-calc code telegramdesktop org.telegram.desktop; do
+            if [ -f "/usr/share/applications/$a.desktop" ]; then
+              cp "/usr/share/applications/$a.desktop" ~/Desktop/ 2>/dev/null
+            fi
+          done
+          for f in ~/Desktop/*.desktop; do
+            if [ -f "$f" ]; then
+              gio set "$f" metadata::xfce-exe-checksum "$(sha256sum "$f" | cut -d' ' -f1)" 2>/dev/null
+            fi
+          done
+          ls ~/Desktop/ | sed 's/^/[desktop] /'
+
+      - name: '5 Desktop look'
         shell: bash
         run: |
           set +e
@@ -202,7 +242,7 @@ jobs:
           'Terminal=false' \
           'Type=Application' \
           'X-XFCE-Autostart-Override=true' > ~/.config/autostart/plank.desktop
-          for a in firefox google-chrome exo-terminal-emulator thunar; do
+          for a in firefox google-chrome exo-terminal-emulator thunar gimp vlc libreoffice-writer libreoffice-calc code telegramdesktop org.telegram.desktop; do
             for d in /usr/share/applications /var/lib/snapd/desktop/applications; do
               if [ -f "$d/$a.desktop" ]; then
                 printf '%s\n' \
@@ -214,7 +254,7 @@ jobs:
           done
           ls ~/.config/plank/dock1/launchers/ | sed 's/^/[dock] /'
 
-      - name: '5 Display and network'
+      - name: '6 Display and network'
         shell: bash
         run: |
           set +e
@@ -289,7 +329,7 @@ jobs:
             if [ -n "$LINK" ]; then echo "CF_LINK=$LINK" >> $GITHUB_ENV; echo "[OK] browser link mil gaya"; else echo "[WARN] tunnel nahi bana"; fi
           fi
 
-      - name: '6 Health check'
+      - name: '7 Health check'
         shell: bash
         run: |
           set +e
@@ -349,6 +389,45 @@ jobs:
           echo "  TIME : ${{ inputs.hours }} ghante"
           echo "=============================================="
 
+      - name: '8 Keep alive'
+        shell: bash
+        run: |
+          set +e
+          H=${{ inputs.hours }}
+          T=$((H*3600)); S=300
+          echo "[OK] $H ghante chalega"
+          while [ $T -gt 0 ]; do
+            if [ $T -lt $S ]; then S=$T; fi
+            sleep $S
+            T=$((T-S))
+            echo "[alive] bache $((T/60)) min  |  $(date +%H:%M:%S)"
+          done
+          echo "TIME OVER"
+
+  android:
+    if: inputs.os == 'android'
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: '1 Info'
+        shell: bash
+        run: |
+          set +e
+          A="${{ inputs.atype }}"
+          KIND=$(echo "$A" | cut -d- -f1)
+          SZ=$(echo "$A" | cut -d- -f2)
+          AW=$(echo "$SZ" | cut -dx -f1)
+          AH=$(echo "$SZ" | cut -dx -f2)
+          if [ "$KIND" = "tablet" ]; then ADPI=200; else ADPI=320; fi
+          echo "=============================================="
+          echo "  CLOUD PC  ->  ANDROID"
+          echo "  Type  : $KIND"
+          echo "  Size  : ${AW}x${AH}  dpi $ADPI"
+          echo "  Time  : ${{ inputs.hours }} ghante"
+          echo "  Web   : ${{ inputs.web }}"
+          echo "     ADB address : $TS_IP:5555"
+          echo "=============================================="
+
       - name: '7 Keep alive'
         shell: bash
         run: |
@@ -361,6 +440,7 @@ jobs:
             sleep $S
             T=$((T-S))
             echo "[alive] bache $((T/60)) min  |  $(date +%H:%M:%S)"
+            pgrep -x scrcpy > /dev/null || echo "[warn] scrcpy dead"
           done
           echo "TIME OVER"
 
@@ -452,3 +532,6 @@ jobs:
             Write-Output "[alive] bache $([math]::Round($left.TotalMinutes)) min  |  $(Get-Date -Format 'HH:mm:ss')"
           }
           Write-Output "TIME OVER"
+        
+    
+    

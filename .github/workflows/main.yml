@@ -303,7 +303,7 @@ jobs:
           fi
           echo "[OK] software done"
 
-      - name: Display and network
+            - name: Display and network
         shell: bash
         run: |
           set +e
@@ -312,6 +312,10 @@ jobs:
           nohup Xvfb :99 -screen 0 ${W}x${H}x24 -ac +extension GLX +render -noreset > /tmp/xvfb.log 2>&1 &
           sleep 4
           export DISPLAY=:99
+          if command -v dbus-launch >/dev/null 2>&1; then
+            eval "$(dbus-launch --sh-syntax)" 2>/dev/null || true
+            echo "[OK] dbus session ready"
+          fi
           nohup startxfce4 > /tmp/xfce.log 2>&1 &
           sleep 10
           nohup x11vnc -display :99 -forever -shared -nopw -rfbport 5900 -quiet > /tmp/x11vnc.log 2>&1 &
@@ -320,35 +324,52 @@ jobs:
           sleep 3
           pgrep -x Xvfb > /dev/null   && echo "[OK] Xvfb"   || echo "[FAIL] Xvfb"
           pgrep -x x11vnc > /dev/null && echo "[OK] x11vnc" || echo "[FAIL] x11vnc"
-          pgrep -f startxfce4 > /dev/null && echo "[OK] XFCE" || echo "[WARN] XFCE process nahi mila"
-          if [ -n "$GTK_THEME_NAME" ] && [ "$GTK_THEME_NAME" != "Adwaita-dark" ]; then
-            xfconf-query -c xsettings -p /Net/ThemeName     -s "$GTK_THEME_NAME" 2>/dev/null || true
-            xfconf-query -c xsettings -p /Net/IconThemeName -s "$ICON_THEME_NAME" 2>/dev/null || true
-            xfconf-query -c xfwm4     -p /general/theme     -s "$GTK_THEME_NAME" 2>/dev/null || true
+          XFCE_UP=0
+          if pgrep -f startxfce4 >/dev/null || pgrep -x xfce4-session >/dev/null || pgrep -x xfdesktop >/dev/null || pgrep -x xfce4-panel >/dev/null; then
+            XFCE_UP=1
+          fi
+          if [ "$XFCE_UP" = "1" ]; then
+            echo "[OK] XFCE chal raha hai"
+          else
+            echo "[WARN] XFCE pehli baar nahi chala - dobara try"
+            nohup startxfce4 > /tmp/xfce2.log 2>&1 &
+            sleep 12
+            if pgrep -f startxfce4 >/dev/null || pgrep -x xfce4-session >/dev/null || pgrep -x xfdesktop >/dev/null || pgrep -x xfce4-panel >/dev/null; then
+              XFCE_UP=1
+              echo "[OK] XFCE doosri koshish mein chal gaya"
+            else
+              echo "[FAIL] XFCE nahi chala - theme live apply skip"
+              tail -5 /tmp/xfce.log 2>/dev/null || true
+            fi
+          fi
+          if [ "$XFCE_UP" = "1" ] && [ -n "$GTK_THEME_NAME" ] && [ "$GTK_THEME_NAME" != "Adwaita-dark" ]; then
+            timeout 10 xfconf-query -c xsettings -p /Net/ThemeName     -s "$GTK_THEME_NAME" 2>/dev/null || true
+            timeout 10 xfconf-query -c xsettings -p /Net/IconThemeName -s "$ICON_THEME_NAME" 2>/dev/null || true
+            timeout 10 xfconf-query -c xfwm4     -p /general/theme     -s "$GTK_THEME_NAME" 2>/dev/null || true
             echo "[OK] theme live apply : $GTK_THEME_NAME"
           fi
-          xfce4-panel -r 2>/dev/null || true
+          timeout 10 xfce4-panel -r 2>/dev/null || true
           echo "--- Tailscale ---"
-          curl -fsSL https://tailscale.com/install.sh | sh 2>&1 | tail -2
+          timeout 180 curl -fsSL --max-time 150 https://tailscale.com/install.sh | sh 2>&1 | tail -2
           K="${{ secrets.TAILSCALE_AUTH_KEY }}"
           if echo "$K" | grep -q '^tskey-auth-'; then
-            sudo tailscale up --authkey="$K" --hostname="winux-$GITHUB_RUN_ID" --accept-routes 2>&1 | tail -3
+            timeout 120 sudo tailscale up --authkey="$K" --hostname="winux-$GITHUB_RUN_ID" --accept-routes 2>&1 | tail -3
             sleep 8
           else
-            sudo tailscale up --hostname="winux-$GITHUB_RUN_ID" > /tmp/ts.log 2>&1 &
+            timeout 150 sudo tailscale up --hostname="winux-$GITHUB_RUN_ID" > /tmp/ts.log 2>&1 &
             sleep 20
             L=$(grep -o 'https://login.tailscale.com/[^ ]*' /tmp/ts.log | head -1)
             if [ -n "$L" ]; then echo "TAILSCALE LOGIN LINK: $L"; else echo "[X] link nahi mila"; fi
           fi
           IP=""
           for i in $(seq 1 12); do
-            IP=$(sudo tailscale ip -4 2>/dev/null | grep '^100\.' | head -1)
+            IP=$(timeout 20 sudo tailscale ip -4 2>/dev/null | grep '^100\.' | head -1)
             [ -n "$IP" ] && break
             sleep 8
           done
           if [ -n "$IP" ]; then echo "TS_IP=$IP" >> $GITHUB_ENV; echo "[OK] Tailscale IP $IP"; else echo "[WARN] IP nahi mila"; fi
           if [ "$WEB" = "yes" ]; then
-            curl -sL -o /tmp/cf https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+            curl -sL --max-time 120 -o /tmp/cf https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
             chmod +x /tmp/cf
             nohup /tmp/cf tunnel --url http://127.0.0.1:6080 --no-autoupdate > /tmp/cf.log 2>&1 &
             LINK=""

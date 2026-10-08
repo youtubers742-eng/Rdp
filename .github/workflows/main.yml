@@ -148,36 +148,55 @@ jobs:
           command -v firefox > /dev/null 2>&1 && echo "[OK] firefox installed" || echo "[FAIL] firefox nahi mila"
           command -v google-chrome > /dev/null 2>&1 && echo "[OK] chrome installed" || echo "[WARN] chrome nahi mila"
 
-      - name: '4 Extra apps'
+      - name: '4 Android apps'
         shell: bash
         run: |
           set +e
-          if [ "${{ inputs.extras }}" = "yes" ]; then
-            sudo apt-get install -y vlc gimp libreoffice-writer libreoffice-calc 2>&1 | tail -3
-            sudo apt-get install -y telegram-desktop qbittorrent filezilla 2>&1 | tail -3
-            sudo apt-get install -y htop neofetch p7zip-full unrar-free 2>&1 | tail -3
-            sudo install -d -m 0755 /etc/apt/keyrings
-            wget -q --timeout=60 --tries=2 https://packages.microsoft.com/keys/microsoft.asc -O /tmp/ms.asc
-            if [ -s /tmp/ms.asc ]; then
-              sudo cp /tmp/ms.asc /etc/apt/keyrings/microsoft.gpg
-              echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/code stable main' > /tmp/vscode.list
-              sudo cp /tmp/vscode.list /etc/apt/sources.list.d/vscode.list
-              sudo apt-get update -y 2>&1 | tail -2
-              sudo apt-get install -y code 2>&1 | tail -3
+          if [ "$CONNECTED" != "1" ]; then echo "[skip] adb nahi hai"; exit 0; fi
+          ADB="adb -s localhost:5555"
+          timeout 30 $ADB shell settings put global device_provisioned 1 2>/dev/null
+          timeout 30 $ADB shell settings put secure user_setup_complete 1 2>/dev/null
+          timeout 30 $ADB shell settings put global package_verifier_enable 0 2>/dev/null
+          timeout 30 $ADB shell settings put global window_animation_scale 0.5 2>/dev/null
+          timeout 30 $ADB shell settings put global transition_animation_scale 0.5 2>/dev/null
+          timeout 30 $ADB shell settings put global animator_duration_scale 0.5 2>/dev/null
+          timeout 30 $ADB shell settings put system screen_off_timeout 600000 2>/dev/null
+          timeout 30 $ADB shell settings put global stay_on_while_plugged_in 3 2>/dev/null
+          timeout 30 $ADB shell svc power stayon true 2>/dev/null
+          timeout 30 $ADB shell wm dismiss-keyguard 2>/dev/null
+          echo "[OK] Android settings set"
+          fdl() {
+            ID="$1"
+            VC=$(timeout 30 curl -s --max-time 25 "https://f-droid.org/api/v1/packages/$ID" | grep -o '"suggestedVersionCode":[0-9]*' | head -1 | cut -d: -f2)
+            if [ -z "$VC" ]; then echo "[WARN] $ID : version nahi mila"; return 0; fi
+            echo "--- $ID build $VC ---"
+            timeout 300 curl -sL --max-time 280 -o /tmp/app.apk "https://f-droid.org/repo/${ID}_${VC}.apk"
+            if [ ! -s /tmp/app.apk ]; then
+              echo "[WARN] $ID : download fail"
+              rm -f /tmp/app.apk
+              return 0
             fi
+            timeout 240 $ADB install -r /tmp/app.apk 2>&1 | tail -1
+            rm -f /tmp/app.apk
+          }
+          echo "===== F-Droid apps ====="
+          fdl com.tailscale.ipn
+          fdl org.mozilla.fennec_fdroid
+          fdl org.videolan.vlc
+          fdl org.schabi.newpipe
+          echo "===== Chrome / Chromium ====="
+          timeout 400 curl -sL --max-time 380 -o /tmp/chrome.apk https://github.com/bromite/bromite/releases/download/108.0.5359.156/x64_ChromePublic.apk
+          if [ -s /tmp/chrome.apk ]; then
+            timeout 300 $ADB install -r /tmp/chrome.apk 2>&1 | tail -1
+            echo "[OK] Chrome install ho gaya"
+          else
+            echo "[WARN] Chrome download nahi hua"
           fi
-          mkdir -p ~/Desktop
-          for a in firefox google-chrome gimp vlc libreoffice-writer libreoffice-calc code telegramdesktop org.telegram.desktop; do
-            if [ -f "/usr/share/applications/$a.desktop" ]; then
-              cp "/usr/share/applications/$a.desktop" ~/Desktop/ 2>/dev/null
-            fi
-          done
-          for f in ~/Desktop/*.desktop; do
-            if [ -f "$f" ]; then
-              gio set "$f" metadata::xfce-exe-checksum "$(sha256sum "$f" | cut -d' ' -f1)" 2>/dev/null
-            fi
-          done
-          ls ~/Desktop/ | sed 's/^/[desktop] /'
+          rm -f /tmp/chrome.apk
+          echo "--- installed apps ---"
+          timeout 30 $ADB shell pm list packages 2>/dev/null | grep -E 'tailscale|fennec|bromite|vlc|newpipe|fdroid'
+          timeout 30 $ADB shell monkey -p com.tailscale.ipn 1 > /dev/null 2>&1
+          echo "[OK] Tailscale app khol diya - usme apna account login kar lena"
 
       - name: '5 Desktop look'
         shell: bash

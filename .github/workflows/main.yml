@@ -148,55 +148,36 @@ jobs:
           command -v firefox > /dev/null 2>&1 && echo "[OK] firefox installed" || echo "[FAIL] firefox nahi mila"
           command -v google-chrome > /dev/null 2>&1 && echo "[OK] chrome installed" || echo "[WARN] chrome nahi mila"
 
-      - name: '4 Android apps'
+      - name: '4 Extra apps'
         shell: bash
         run: |
           set +e
-          if [ "$CONNECTED" != "1" ]; then echo "[skip] adb nahi hai"; exit 0; fi
-          ADB="adb -s localhost:5555"
-          timeout 30 $ADB shell settings put global device_provisioned 1 2>/dev/null
-          timeout 30 $ADB shell settings put secure user_setup_complete 1 2>/dev/null
-          timeout 30 $ADB shell settings put global package_verifier_enable 0 2>/dev/null
-          timeout 30 $ADB shell settings put global window_animation_scale 0.5 2>/dev/null
-          timeout 30 $ADB shell settings put global transition_animation_scale 0.5 2>/dev/null
-          timeout 30 $ADB shell settings put global animator_duration_scale 0.5 2>/dev/null
-          timeout 30 $ADB shell settings put system screen_off_timeout 600000 2>/dev/null
-          timeout 30 $ADB shell settings put global stay_on_while_plugged_in 3 2>/dev/null
-          timeout 30 $ADB shell svc power stayon true 2>/dev/null
-          timeout 30 $ADB shell wm dismiss-keyguard 2>/dev/null
-          echo "[OK] Android settings set"
-          fdl() {
-            ID="$1"
-            VC=$(timeout 30 curl -s --max-time 25 "https://f-droid.org/api/v1/packages/$ID" | grep -o '"suggestedVersionCode":[0-9]*' | head -1 | cut -d: -f2)
-            if [ -z "$VC" ]; then echo "[WARN] $ID : version nahi mila"; return 0; fi
-            echo "--- $ID build $VC ---"
-            timeout 300 curl -sL --max-time 280 -o /tmp/app.apk "https://f-droid.org/repo/${ID}_${VC}.apk"
-            if [ ! -s /tmp/app.apk ]; then
-              echo "[WARN] $ID : download fail"
-              rm -f /tmp/app.apk
-              return 0
+          if [ "${{ inputs.extras }}" = "yes" ]; then
+            sudo apt-get install -y vlc gimp libreoffice-writer libreoffice-calc 2>&1 | tail -3
+            sudo apt-get install -y telegram-desktop qbittorrent filezilla 2>&1 | tail -3
+            sudo apt-get install -y htop neofetch p7zip-full unrar-free 2>&1 | tail -3
+            sudo install -d -m 0755 /etc/apt/keyrings
+            wget -q --timeout=60 --tries=2 https://packages.microsoft.com/keys/microsoft.asc -O /tmp/ms.asc
+            if [ -s /tmp/ms.asc ]; then
+              sudo cp /tmp/ms.asc /etc/apt/keyrings/microsoft.gpg
+              echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/code stable main' > /tmp/vscode.list
+              sudo cp /tmp/vscode.list /etc/apt/sources.list.d/vscode.list
+              sudo apt-get update -y 2>&1 | tail -2
+              sudo apt-get install -y code 2>&1 | tail -3
             fi
-            timeout 240 $ADB install -r /tmp/app.apk 2>&1 | tail -1
-            rm -f /tmp/app.apk
-          }
-          echo "===== F-Droid apps ====="
-          fdl com.tailscale.ipn
-          fdl org.mozilla.fennec_fdroid
-          fdl org.videolan.vlc
-          fdl org.schabi.newpipe
-          echo "===== Chrome / Chromium ====="
-          timeout 400 curl -sL --max-time 380 -o /tmp/chrome.apk https://github.com/bromite/bromite/releases/download/108.0.5359.156/x64_ChromePublic.apk
-          if [ -s /tmp/chrome.apk ]; then
-            timeout 300 $ADB install -r /tmp/chrome.apk 2>&1 | tail -1
-            echo "[OK] Chrome install ho gaya"
-          else
-            echo "[WARN] Chrome download nahi hua"
           fi
-          rm -f /tmp/chrome.apk
-          echo "--- installed apps ---"
-          timeout 30 $ADB shell pm list packages 2>/dev/null | grep -E 'tailscale|fennec|bromite|vlc|newpipe|fdroid'
-          timeout 30 $ADB shell monkey -p com.tailscale.ipn 1 > /dev/null 2>&1
-          echo "[OK] Tailscale app khol diya - usme apna account login kar lena"
+          mkdir -p ~/Desktop
+          for a in firefox google-chrome gimp vlc libreoffice-writer libreoffice-calc code telegramdesktop org.telegram.desktop; do
+            if [ -f "/usr/share/applications/$a.desktop" ]; then
+              cp "/usr/share/applications/$a.desktop" ~/Desktop/ 2>/dev/null
+            fi
+          done
+          for f in ~/Desktop/*.desktop; do
+            if [ -f "$f" ]; then
+              gio set "$f" metadata::xfce-exe-checksum "$(sha256sum "$f" | cut -d' ' -f1)" 2>/dev/null
+            fi
+          done
+          ls ~/Desktop/ | sed 's/^/[desktop] /'
 
       - name: '5 Desktop look'
         shell: bash
@@ -444,6 +425,241 @@ jobs:
           echo "  Size  : ${AW}x${AH}  dpi $ADPI"
           echo "  Time  : ${{ inputs.hours }} ghante"
           echo "  Web   : ${{ inputs.web }}"
+          echo "=============================================="
+          echo "AW=$AW" >> $GITHUB_ENV
+          echo "AH=$AH" >> $GITHUB_ENV
+          echo "ADPI=$ADPI" >> $GITHUB_ENV
+          echo "WEB=${{ inputs.web }}" >> $GITHUB_ENV
+
+      - name: '2 Kernel modules and packages'
+        shell: bash
+        run: |
+          set +e
+          sudo apt-get update -y 2>&1 | tail -2
+          sudo apt-get install -y linux-modules-extra-$(uname -r) 2>&1 | tail -2
+          sudo modprobe binder_linux devices="binder,hwbinder,vndbinder" 2>&1 | tail -2
+          sudo modprobe ashmem_linux 2>&1 | tail -2
+          BINDER_OK=0
+          if [ -e /dev/binder ] || [ -e /dev/binderfs/binder ]; then BINDER_OK=1; fi
+          if [ "$BINDER_OK" = "0" ]; then
+            sudo mkdir -p /dev/binderfs
+            sudo mount -t binder binder /dev/binderfs 2>/dev/null
+            sudo ln -sf /dev/binderfs/binder /dev/binder 2>/dev/null
+            sudo ln -sf /dev/binderfs/hwbinder /dev/hwbinder 2>/dev/null
+            sudo ln -sf /dev/binderfs/vndbinder /dev/vndbinder 2>/dev/null
+            if [ -e /dev/binderfs/binder ]; then BINDER_OK=1; fi
+          fi
+          if [ "$BINDER_OK" = "1" ]; then echo "[OK] binder ready"; else echo "[FAIL] binder nahi mila"; fi
+          echo "BINDER_OK=$BINDER_OK" >> $GITHUB_ENV
+          sudo apt-get install -y adb scrcpy 2>&1 | tail -3
+          command -v adb > /dev/null 2>&1 || sudo apt-get install -y android-tools-adb 2>&1 | tail -2
+          sudo apt-get install -y xvfb x11vnc novnc websockify curl xdotool 2>&1 | tail -3
+          sudo apt-get install -y -f 2>&1 | tail -2
+          for b in adb scrcpy Xvfb x11vnc websockify docker; do
+            if command -v $b > /dev/null 2>&1; then echo "[OK] $b"; else echo "[WARN] $b nahi mila"; fi
+          done
+
+      - name: '3 Start Android'
+        shell: bash
+        run: |
+          set +e
+          echo "CONNECTED=0" >> $GITHUB_ENV
+          if [ "$BINDER_OK" != "1" ]; then
+            echo "[FAIL] binder nahi hai - Android start nahi ho sakta"
+            exit 0
+          fi
+          IMG=""
+          for t in 13.0.0-latest 12.0.0-latest 11.0.0-latest; do
+            echo "--- trying redroid/redroid:$t ---"
+            timeout 900 sudo docker pull redroid/redroid:$t > /tmp/pull.log 2>&1
+            if [ $? -eq 0 ]; then IMG=redroid/redroid:$t; break; fi
+            tail -3 /tmp/pull.log
+          done
+          if [ -z "$IMG" ]; then echo "[FAIL] docker image nahi mila"; exit 0; fi
+          echo "[OK] image = $IMG"
+          mkdir -p ~/data
+          timeout 60 sudo docker rm -f redroid 2>/dev/null
+          timeout 180 sudo docker run -itd --privileged --name redroid \
+            -v ~/data:/data \
+            -p 5555:5555 \
+            $IMG \
+            androidboot.redroid_width=$AW \
+            androidboot.redroid_height=$AH \
+            androidboot.redroid_dpi=$ADPI \
+            androidboot.redroid_gpu_mode=guest \
+            androidboot.use_memfd=true > /tmp/docker.log 2>&1
+          sleep 10
+          timeout 30 sudo docker ps -a --filter name=redroid --format '{{.Status}}'
+          timeout 20 adb kill-server 2>/dev/null
+          timeout 30 adb start-server 2>&1 | tail -2
+          CONNECTED=0
+          for i in $(seq 1 30); do
+            timeout 20 adb connect localhost:5555 > /tmp/adb.log 2>&1
+            if grep -q 'connected to' /tmp/adb.log; then CONNECTED=1; break; fi
+            sleep 5
+          done
+          if [ "$CONNECTED" = "1" ]; then echo "[OK] adb connected"; else echo "[FAIL] adb connect nahi hua"; tail -3 /tmp/adb.log; fi
+          echo "CONNECTED=$CONNECTED" >> $GITHUB_ENV
+          BOOT=0
+          for i in $(seq 1 60); do
+            B=$(timeout 15 adb -s localhost:5555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+            if [ "$B" = "1" ]; then BOOT=1; break; fi
+            sleep 5
+          done
+          if [ "$BOOT" = "1" ]; then echo "[OK] Android boot ho gaya"; else echo "[WARN] boot complete nahi hua, phir bhi aage badh rahe hain"; fi
+          timeout 20 adb -s localhost:5555 shell getprop ro.build.version.release 2>/dev/null
+          timeout 20 adb devices 2>&1 | tail -5
+
+      - name: '4 Android apps'
+        shell: bash
+        run: |
+          set +e 
+          if [ "$CONNECTED" != "1" ]; then echo "[skip] adb nahi hai"; exit 0; fi
+          ADB="adb -s localhost:5555"
+          timeout 30 $ADB shell settings put global device_provisioned 1 2>/dev/null
+          timeout 30 $ADB shell settings put secure user_setup_complete 1 2>/dev/null
+          timeout 30 $ADB shell settings put global package_verifier_enable 0 2>/dev/null
+          timeout 30 $ADB shell settings put global window_animation_scale 0.5 2>/dev/null
+          timeout 30 $ADB shell settings put global transition_animation_scale 0.5 2>/dev/null
+          timeout 30 $ADB shell settings put global animator_duration_scale 0.5 2>/dev/null
+          timeout 30 $ADB shell settings put system screen_off_timeout 600000 2>/dev/null
+          timeout 30 $ADB shell settings put global stay_on_while_plugged_in 3 2>/dev/null
+          timeout 30 $ADB shell svc power stayon true 2>/dev/null
+          timeout 30 $ADB shell wm dismiss-keyguard 2>/dev/null
+          echo "[OK] Android settings set"
+          fdl() {
+            ID="$1"
+            VC=$(timeout 30 curl -s --max-time 25 "https://f-droid.org/api/v1/packages/$ID" | grep -o '"suggestedVersionCode":[0-9]*' | head -1 | cut -d: -f2)
+            if [ -z "$VC" ]; then echo "[WARN] $ID : version nahi mila"; return 0; fi
+            echo "--- $ID build $VC ---"
+            timeout 300 curl -sL --max-time 280 -o /tmp/app.apk "https://f-droid.org/repo/${ID}_${VC}.apk"
+            if [ ! -s /tmp/app.apk ]; then
+              echo "[WARN] $ID : download fail"
+              rm -f /tmp/app.apk
+              return 0
+            fi
+            timeout 240 $ADB install -r /tmp/app.apk 2>&1 | tail -1
+            rm -f /tmp/app.apk
+          }
+          echo "===== F-Droid apps ====="
+          fdl com.tailscale.ipn
+          fdl org.mozilla.fennec_fdroid
+          fdl org.videolan.vlc
+          fdl org.schabi.newpipe
+          echo "===== Chrome / Chromium ====="
+          timeout 400 curl -sL --max-time 380 -o /tmp/chrome.apk https://github.com/bromite/bromite/releases/download/108.0.5359.156/x64_ChromePublic.apk
+          if [ -s /tmp/chrome.apk ]; then
+            timeout 300 $ADB install -r /tmp/chrome.apk 2>&1 | tail -1
+            echo "[OK] Chrome install ho gaya"
+          else
+            echo "[WARN] Chrome download nahi hua"
+          fi
+          rm -f /tmp/chrome.apk
+          echo "--- installed apps ---"
+          timeout 30 $ADB shell pm list packages 2>/dev/null | grep -E 'tailscale|fennec|bromite|vlc|newpipe|fdroid'
+          timeout 30 $ADB shell monkey -p com.tailscale.ipn 1 > /dev/null 2>&1
+          echo "[OK] Tailscale app khol diya - usme apna account login kar lena"
+
+      - name: '5 Display and network'
+        shell: bash
+        run: |
+          set +e
+          if [ "$CONNECTED" = "1" ]; then
+            rm -rf /tmp/.X99-lock
+            nohup Xvfb :99 -screen 0 ${AW}x${AH}x24 -ac +extension GLX +render -noreset > /tmp/xvfb.log 2>&1 &
+            sleep 4
+            export DISPLAY=:99
+            try_scrcpy() {
+              nohup scrcpy -s localhost:5555 "$@" > /tmp/scrcpy.log 2>&1 &
+              sleep 10
+              if pgrep -x scrcpy > /dev/null; then return 0; else return 1; fi
+            }
+            SC=0
+            if try_scrcpy --no-audio --stay-awake --disable-screensaver --window-x 0 --window-y 0 --window-width $AW --window-height $AH; then
+              SC=1; echo "[OK] scrcpy chala (window mode)"
+            elif try_scrcpy --no-audio --window-width $AW --window-height $AH; then
+              SC=1; echo "[OK] scrcpy chala (simple window)"
+            elif try_scrcpy -m 1200; then
+              SC=1; echo "[OK] scrcpy chala (max size)"
+            elif try_scrcpy; then
+              SC=1; echo "[OK] scrcpy chala (default)"
+            else
+              echo "[FAIL] scrcpy nahi chala"
+            fi
+            if [ "$SC" = "0" ]; then tail -8 /tmp/scrcpy.log; fi
+            nohup x11vnc -display :99 -forever -shared -nopw -rfbport 5900 -quiet > /tmp/x11vnc.log 2>&1 &
+            sleep 3
+            nohup websockify --web=/usr/share/novnc 6080 localhost:5900 > /tmp/novnc.log 2>&1 &
+            sleep 3
+            pgrep -x Xvfb > /dev/null && echo "[OK] Xvfb" || echo "[FAIL] Xvfb"
+            pgrep -x scrcpy > /dev/null && echo "[OK] scrcpy" || echo "[FAIL] scrcpy"
+            pgrep -x x11vnc > /dev/null && echo "[OK] x11vnc" || echo "[FAIL] x11vnc"
+          else
+            echo "[WARN] Android screen nahi chala - Tailscale aur link phir bhi chalenge"
+          fi
+
+          echo "--- Tailscale ---"
+          timeout 180 curl -fsSL --max-time 150 https://tailscale.com/install.sh | sh 2>&1 | tail -2
+          K="${{ secrets.TAILSCALE_AUTH_KEY }}"
+          IP=""
+          if echo "$K" | grep -q '^tskey-auth-'; then
+            timeout 120 sudo tailscale up --authkey="$K" --hostname="android-$GITHUB_RUN_ID" --accept-routes 2>&1 | tail -3
+            for i in $(seq 1 12); do
+              IP=$(timeout 20 sudo tailscale ip -4 2>/dev/null | grep '^100\.' | head -1)
+              if [ -n "$IP" ]; then break; fi
+              sleep 8
+            done
+            if [ -n "$IP" ]; then echo "TS_IP=$IP" >> $GITHUB_ENV; echo "[OK] Tailscale IP = $IP"; else echo "[WARN] Tailscale IP nahi mila"; fi
+          else
+            echo "[WARN] TAILSCALE_AUTH_KEY nahi hai - browser link use karo"
+          fi
+          if [ "$WEB" = "yes" ]; then
+            timeout 150 curl -sL --max-time 120 -o /tmp/cf https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+            chmod +x /tmp/cf
+            nohup /tmp/cf tunnel --url http://127.0.0.1:6080 --no-autoupdate > /tmp/cf.log 2>&1 &
+            LINK=""
+            for i in $(seq 1 20); do
+              sleep 4
+              LINK=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' /tmp/cf.log | head -1)
+              if [ -n "$LINK" ]; then break; fi
+            done
+            if [ -n "$LINK" ]; then echo "CF_LINK=$LINK" >> $GITHUB_ENV; echo "[OK] browser link mil gaya"; else echo "[WARN] tunnel nahi bana"; fi
+          fi
+
+      - name: '6 Health check'
+        shell: bash
+        run: |
+          set +e
+          echo "=============================================="
+          echo "  HEALTH CHECK - ANDROID"
+          echo "=============================================="
+          chk() {
+            if [ "$1" = "0" ]; then echo "[OK] $2"; else echo "[FAIL] $2"; fi
+          }
+          pgrep -x Xvfb > /dev/null; chk $? "Xvfb display"
+          pgrep -x scrcpy > /dev/null; chk $? "scrcpy mirror"
+          pgrep -x x11vnc > /dev/null; chk $? "x11vnc :5900"
+          pgrep -f websockify > /dev/null; chk $? "websockify :6080"
+          timeout 30 sudo docker ps --filter name=redroid --format '{{.Status}}' 2>/dev/null | grep -q 'Up'; chk $? "redroid container"
+          timeout 20 adb -s localhost:5555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' | grep -q '^1$'; chk $? "Android booted"
+          timeout 20 adb -s localhost:5555 shell pm list packages 2>/dev/null | grep -q 'org.fdroid.fdroid'; chk $? "F-Droid app"
+          echo "=============================================="
+          echo "  ANDROID TAIYAR HAI"
+          echo "=============================================="
+          echo "  Screen : ${AW}x${AH} dpi ${ADPI}"
+          if [ -n "$TS_IP" ]; then
+            echo "  ADB    : $TS_IP:5555   (scrcpy app se connect karo)"
+          else
+            echo "  ADB    : Tailscale key nahi hai"
+          fi
+          if [ -n "$CF_LINK" ]; then
+            echo "  WEB    : $CF_LINK/vnc.html?autoconnect=true&resize=scale"
+          fi
+          echo "  TIME   : ${{ inputs.hours }} ghante"
+          echo "=============================================="
+          echo "  Phone se kaise chalayein:"
+          echo "  1) Upar wala WEB link browser me kholo"
+          echo "  2) ya phone me scrcpy app install karke"
           echo "     ADB address : $TS_IP:5555"
           echo "=============================================="
 
@@ -551,6 +767,3 @@ jobs:
             Write-Output "[alive] bache $([math]::Round($left.TotalMinutes)) min  |  $(Get-Date -Format 'HH:mm:ss')"
           }
           Write-Output "TIME OVER"
-        
-    
-    

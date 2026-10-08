@@ -320,6 +320,14 @@ jobs:
           sleep 3
           pgrep -x Xvfb > /dev/null   && echo "[OK] Xvfb"   || echo "[FAIL] Xvfb"
           pgrep -x x11vnc > /dev/null && echo "[OK] x11vnc" || echo "[FAIL] x11vnc"
+          pgrep -f startxfce4 > /dev/null && echo "[OK] XFCE" || echo "[WARN] XFCE process nahi mila"
+          if [ -n "$GTK_THEME_NAME" ] && [ "$GTK_THEME_NAME" != "Adwaita-dark" ]; then
+            xfconf-query -c xsettings -p /Net/ThemeName     -s "$GTK_THEME_NAME" 2>/dev/null || true
+            xfconf-query -c xsettings -p /Net/IconThemeName -s "$ICON_THEME_NAME" 2>/dev/null || true
+            xfconf-query -c xfwm4     -p /general/theme     -s "$GTK_THEME_NAME" 2>/dev/null || true
+            echo "[OK] theme live apply : $GTK_THEME_NAME"
+          fi
+          xfce4-panel -r 2>/dev/null || true
           echo "--- Tailscale ---"
           curl -fsSL https://tailscale.com/install.sh | sh 2>&1 | tail -2
           K="${{ secrets.TAILSCALE_AUTH_KEY }}"
@@ -356,17 +364,21 @@ jobs:
         shell: bash
         run: |
           PW=$(cat /tmp/PW 2>/dev/null || echo "$PC_PASSWORD")
-          chk(){ if [ "$1" = "1" ]; then echo "  [OK]   $2"; else echo "  [FAIL] $2"; fi; }
+          chk(){ if [ "$1" = "0" ]; then echo "  [OK]   $2"; else echo "  [FAIL] $2"; fi; }
+          GTK_DET=$(ls /usr/share/themes 2>/dev/null | grep -i win11 | head -1)
+          ICO_DET=$(ls /usr/share/icons  2>/dev/null | grep -i win11 | head -1)
+          FF_V=$(firefox --version 2>/dev/null | head -1)
+          CH_V=$(google-chrome --version 2>/dev/null | head -1)
           echo ""
           echo "############# HEALTH CHECK #############"
-          ls /usr/share/themes 2>/dev/null | grep -qi win11; chk $? "Win11 theme"
-          ls /usr/share/icons  2>/dev/null | grep -qi win11; chk $? "Win11 icons"
-          [ -f "$HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml" ];    chk $? "theme config"
-          [ -f "$HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml" ];  chk $? "taskbar config"
-          which firefox       >/dev/null 2>&1; chk $? "Firefox"
-          which google-chrome >/dev/null 2>&1; chk $? "Chrome"
-          pgrep -x Xvfb       >/dev/null;      chk $? "display"
-          pgrep -x x11vnc     >/dev/null;      chk $? "VNC"
+          [ -n "$GTK_DET" ]; chk $? "Win11 theme  : ${GTK_DET:-NAHI MILA}"
+          [ -n "$ICO_DET" ]; chk $? "Win11 icons  : ${ICO_DET:-NAHI MILE}"
+          [ -f "$HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml" ];   chk $? "theme config"
+          [ -f "$HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml" ]; chk $? "taskbar config"
+          which firefox       >/dev/null 2>&1; chk $? "Firefox      : ${FF_V:-nahi}"
+          which google-chrome >/dev/null 2>&1; chk $? "Chrome       : ${CH_V:-nahi}"
+          pgrep -x Xvfb       >/dev/null;      chk $? "display      : Xvfb :99"
+          pgrep -x x11vnc     >/dev/null;      chk $? "VNC          : port 5900"
           [ -f "$HOME/Pictures/win11.png" ];   chk $? "wallpaper"
           echo "########################################"
           echo "  USER     : runner"
@@ -473,15 +485,17 @@ jobs:
           }
           if ($k -notmatch '^tskey-auth-') {
             $out = "$env:TEMP\ts_out.txt"
-            Remove-Item $out -ErrorAction SilentlyContinue
-            Start-Process -FilePath $ts -ArgumentList "up","--hostname=$pcName" -RedirectStandardOutput $out -RedirectStandardError $out -WindowStyle Hidden -PassThru | Out-Null
+            $err = "$env:TEMP\ts_err.txt"
+            Remove-Item $out,$err -ErrorAction SilentlyContinue
+            Start-Process -FilePath $ts -ArgumentList "up","--hostname=$pcName" -RedirectStandardOutput $out -RedirectStandardError $err -WindowStyle Hidden -PassThru | Out-Null
             $link = $null
             for ($i=0; $i -lt 12; $i++) {
               Start-Sleep -Seconds 5
-              if (Test-Path $out) {
-                $m = [regex]::Match((Get-Content $out -Raw -ErrorAction SilentlyContinue), 'https://login\.tailscale\.com/\S+')
-                if ($m.Success) { $link = $m.Value.Trim(); break }
-              }
+              $log = ""
+              if (Test-Path $out) { $log += (Get-Content $out -Raw -ErrorAction SilentlyContinue) }
+              if (Test-Path $err) { $log += (Get-Content $err -Raw -ErrorAction SilentlyContinue) }
+              $m = [regex]::Match($log, 'https://login\.tailscale\.com/\S+')
+              if ($m.Success) { $link = $m.Value.Trim(); break }
             }
             if ($link) { Write-Host "TAILSCALE LOGIN LINK: $link" } else { Write-Host "[X] link nahi mila" }
           }
@@ -558,17 +572,19 @@ jobs:
           $cf = "$env:TEMP\cloudflared.exe"
           Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile $cf
           $cfOut = "$env:TEMP\cf.log"
-          Remove-Item $cfOut -ErrorAction SilentlyContinue
-          Start-Process -FilePath $cf -ArgumentList "tunnel","--url","http://127.0.0.1:8099","--no-autoupdate" -RedirectStandardOutput $cfOut -RedirectStandardError $cfOut -WindowStyle Hidden -PassThru | Out-Null
+          $cfErr = "$env:TEMP\cf_err.log"
+          Remove-Item $cfOut,$cfErr -ErrorAction SilentlyContinue
+          Start-Process -FilePath $cf -ArgumentList "tunnel","--url","http://127.0.0.1:8099","--no-autoupdate" -RedirectStandardOutput $cfOut -RedirectStandardError $cfErr -WindowStyle Hidden -PassThru | Out-Null
           for ($i=0; $i -lt 20; $i++) {
             Start-Sleep -Seconds 4
-            if (Test-Path $cfOut) {
-              $m = [regex]::Match((Get-Content $cfOut -Raw -ErrorAction SilentlyContinue), 'https://[a-z0-9\-]+\.trycloudflare\.com')
-              if ($m.Success) {
-                "CF_LINK=$($m.Value)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-                Write-Host "BROWSER LINK: $($m.Value)"
-                break
-              }
+            $log = ""
+            if (Test-Path $cfOut) { $log += (Get-Content $cfOut -Raw -ErrorAction SilentlyContinue) }
+            if (Test-Path $cfErr) { $log += (Get-Content $cfErr -Raw -ErrorAction SilentlyContinue) }
+            $m = [regex]::Match($log, 'https://[a-z0-9\-]+\.trycloudflare\.com')
+            if ($m.Success) {
+              "CF_LINK=$($m.Value)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+              Write-Host "BROWSER LINK: $($m.Value)"
+              break
             }
           }
 

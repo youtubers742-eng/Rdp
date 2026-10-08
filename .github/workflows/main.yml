@@ -1,653 +1,454 @@
-# ============================================================
-#  CLOUD PC  -  Winux  ya  Windows 11   (ek hi file)
-#  Actions > Cloud PC > Run workflow
-#    os    = winux  ya  windows11
-#    hours = 1 se 5
-#  Secret: TAILSCALE_AUTH_KEY  =  tskey-auth-.....
-#          tskey-api-..... NAHI chalega
-# ============================================================
-
 name: Cloud PC
 
 on:
   workflow_dispatch:
     inputs:
-
       os:
-        description: Kaunsa chahiye - Winux ya Windows 11
+        description: 'Kaunsa OS chahiye'
         required: true
-        default: winux
+        default: 'linux'
         type: choice
-        options: [winux, windows11]
-
+        options:
+          - 'linux'
+          - 'windows11'
       hours:
-        description: Kitne ghante chalega - 1 se 5
+        description: 'Kitne ghante chalega (1-5)'
         required: true
         default: '5'
-        type: string
-
-      pc_password:
-        description: Password - khali chhod to khud banega
-        required: false
-        default: ''
-
-      software_pack:
-        description: Software kitna
-        required: true
-        default: essential
         type: choice
-        options: [none, essential, dev, all]
-
-      browsers:
-        description: Chrome aur Firefox install kare
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - '5'
+      screen:
+        description: 'Screen size'
         required: true
-        default: 'yes'
+        default: '1366x768'
         type: choice
-        options: ['yes', 'no']
-
-      web_access:
-        description: Browser se access - koi app install nahi
+        options:
+          - '1280x720'
+          - '1366x768'
+          - '1600x900'
+          - '1920x1080'
+      web:
+        description: 'Browser me desktop (noVNC link)'
         required: true
         default: 'yes'
         type: choice
-        options: ['yes', 'no']
-
-      theme:
-        description: WINUX - Windows 11 look
-        required: true
-        default: win11
-        type: choice
-        options: [win11, plain]
-
-      resolution:
-        description: WINUX - screen size
-        required: true
-        default: 1600x900
-        type: choice
-        options: [1280x720, 1600x900, 1920x1080]
-
-      wine:
-        description: WINUX - Wine - exe chalega
+        options:
+          - 'yes'
+          - 'no'
+      chrome:
+        description: 'Google Chrome bhi install kare'
         required: true
         default: 'yes'
         type: choice
-        options: ['yes', 'no']
-
-      omnirush:
-        description: WINDOWS - OmniRush AI agent
-        required: true
-        default: 'yes'
-        type: choice
-        options: ['yes', 'no']
+        options:
+          - 'yes'
+          - 'no'
 
 jobs:
 
-  # ============================================================
-  #  WINUX - Linux jo bilkul Windows 11 dikhe
-  # ============================================================
-  winux:
-    if: inputs.os == 'winux'
-    name: Winux Cloud PC
+  linux:
+    if: inputs.os == 'linux'
     runs-on: ubuntu-latest
-    timeout-minutes: 355
-    env:
-      DEBIAN_FRONTEND: noninteractive
-      THEME:    ${{ inputs.theme }}
-      RES:      ${{ inputs.resolution }}
-      PACK:     ${{ inputs.software_pack }}
-      BROWSERS: ${{ inputs.browsers }}
-      WINE:     ${{ inputs.wine }}
-      WEB:      ${{ inputs.web_access }}
-
     steps:
 
-      - name: Setup desktop
+      - name: '1 Info'
         shell: bash
         run: |
           set +e
-          echo "=== WINUX setup ==="
-          nproc; free -h | head -2
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq xfce4 xfce4-goodies xfce4-terminal xrdp xorgxrdp \
-            dbus-x11 xvfb x11vnc novnc websockify curl wget git unzip xclip \
-            imagemagick sassc gtk2-engines-murrine libglib2.0-dev-bin \
-            xfce4-whiskermenu-plugin 2>&1 | tail -3
-          echo "exec startxfce4" > "$HOME/.xsession"
-          chmod +x "$HOME/.xsession"
-          echo "allowed_users=anybody" | sudo tee /etc/X11/Xwrapper.config > /dev/null
-          sudo adduser xrdp ssl-cert 2>/dev/null || true
-          sudo systemctl restart xrdp 2>/dev/null || true
-          sleep 3
-          systemctl is-active --quiet xrdp && echo "[OK] xrdp" || echo "[WARN] xrdp service nahi chala"
-          which sassc >/dev/null 2>&1 && echo "[OK] sassc" || echo "[WARN] sassc nahi - theme kharab ho sakta hai"
-          PW="${{ inputs.pc_password }}"
-          if [ -z "$PW" ]; then PW=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 12); fi
-          echo "runner:$PW" | sudo chpasswd
-          echo "$PW" > /tmp/PW
-          echo "PC_PASSWORD=$PW" >> $GITHUB_ENV
-          echo "[OK] password ready"
+          echo "=============================================="
+          echo "  CLOUD PC  ->  LINUX DESKTOP"
+          echo "  Screen : ${{ inputs.screen }}"
+          echo "  Time   : ${{ inputs.hours }} ghante"
+          echo "  Web    : ${{ inputs.web }}"
+          echo "  Chrome : ${{ inputs.chrome }}"
+          echo "=============================================="
+          echo "RES=${{ inputs.screen }}" >> $GITHUB_ENV
+          echo "WEB=${{ inputs.web }}" >> $GITHUB_ENV
 
-      - name: Windows 11 look
+      - name: '2 Install packages'
         shell: bash
         run: |
           set +e
-          if [ "$THEME" = "plain" ]; then echo "plain mode - theme skip"; exit 0; fi
-          cd /tmp
-          rm -rf Win11-gtk-theme Win11-icon-theme
-          for i in 1 2 3; do
-            git clone --depth 1 -q https://github.com/yeyushengfan258/Win11-gtk-theme.git && break
-            echo "  retry $i"; sleep 3
+          sudo apt-get update -y 2>&1 | tail -2
+          sudo apt-get install -y xvfb x11vnc novnc websockify xrdp dbus-x11 x11-utils 2>&1 | tail -3
+          sudo apt-get install -y xfce4 xfce4-goodies xfce4-terminal thunar thunar-archive-plugin 2>&1 | tail -3
+          sudo apt-get install -y arc-theme materia-gtk-theme papirus-icon-theme plank 2>&1 | tail -3
+          sudo apt-get install -y fonts-noto fonts-liberation imagemagick xclip curl wget unzip 2>&1 | tail -3
+          sudo apt-get install -y -f 2>&1 | tail -2
+          for b in Xvfb x11vnc websockify startxfce4 xfconf-query dbus-launch plank; do
+            if command -v $b > /dev/null 2>&1; then echo "[OK] $b"; else echo "[WARN] $b nahi mila"; fi
           done
-          if [ -d Win11-gtk-theme ]; then
-            cd Win11-gtk-theme && chmod +x install.sh && sudo ./install.sh -c dark --tweaks round 2>&1 | tail -3
-            cd /tmp
+
+      - name: '3 Browsers'
+        shell: bash
+        run: |
+          set +e
+          echo "--- Firefox ---"
+          sudo install -d -m 0755 /etc/apt/keyrings
+          wget -q --timeout=60 --tries=2 https://packages.mozilla.org/apt/repo-signing-key.gpg -O /tmp/moz.asc
+          if [ -s /tmp/moz.asc ]; then
+            sudo cp /tmp/moz.asc /etc/apt/keyrings/packages.mozilla.org.asc
+            echo 'deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main' > /tmp/moz.list
+            sudo cp /tmp/moz.list /etc/apt/sources.list.d/mozilla.list
+            printf '%s\n' 'Package: *' 'Pin: origin packages.mozilla.org' 'Pin-Priority: 1000' > /tmp/moz.pin
+            sudo cp /tmp/moz.pin /etc/apt/preferences.d/mozilla
+            sudo apt-get update -y 2>&1 | tail -2
+            sudo apt-get install -y firefox 2>&1 | tail -3
           fi
-          for i in 1 2 3; do
-            git clone --depth 1 -q https://github.com/yeyushengfan258/Win11-icon-theme.git && break
-            echo "  retry $i"; sleep 3
-          done
-          if [ -d Win11-icon-theme ]; then
-            cd Win11-icon-theme && chmod +x install.sh && sudo ./install.sh 2>&1 | tail -3
-            cd /tmp
+          if ! command -v firefox > /dev/null 2>&1; then
+            echo "[WARN] repo fail - direct download"
+            wget -q --timeout=120 --tries=2 -O /tmp/ff.tar.xz 'https://download.mozilla.org/?product=firefox-latest&os=linux64&lang=en-US'
+            if [ -s /tmp/ff.tar.xz ]; then
+              sudo rm -rf /opt/firefox
+              sudo tar -xJf /tmp/ff.tar.xz -C /opt/
+              sudo ln -sf /opt/firefox/firefox /usr/local/bin/firefox
+              printf '%s\n' \
+              '[Desktop Entry]' \
+              'Name=Firefox' \
+              'Comment=Browse the World Wide Web' \
+              'Exec=/opt/firefox/firefox --no-sandbox --disable-dev-shm-usage %u' \
+              'Icon=/opt/firefox/browser/chrome/icons/default/default128.png' \
+              'Terminal=false' \
+              'Type=Application' \
+              'Categories=Network;WebBrowser;' > /tmp/ff.desktop
+              sudo cp /tmp/ff.desktop /usr/share/applications/firefox.desktop
+            fi
           fi
-          sudo gtk-update-icon-cache -f -q /usr/share/icons/Win11 2>/dev/null || true
-          GTK_NAME=""
-          for d in /usr/share/themes/Win11*Dark* /usr/share/themes/Win11*; do
-            true
-            [ -d "$d" ] && GTK_NAME=$(basename "$d") && break
+          echo "--- Chrome ---"
+          if [ "${{ inputs.chrome }}" = "yes" ]; then
+            wget -q --timeout=150 --tries=2 -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+            if [ -s /tmp/chrome.deb ]; then
+              sudo apt-get install -y /tmp/chrome.deb 2>&1 | tail -3
+              sudo apt-get install -y -f 2>&1 | tail -2
+            fi
+          fi
+          patchde() {
+            F="$1"
+            if [ ! -f "$F" ]; then echo "[skip] $F"; return 0; fi
+            if grep -q -- '--no-sandbox' "$F"; then echo "[OK] already patched"; return 0; fi
+            sudo sed -i -E 's#^(Exec=[^ ]+)#\1 --no-sandbox --disable-dev-shm-usage#' "$F" 2>/dev/null
+            if grep -q -- '--no-sandbox' "$F"; then echo "[OK] patched $F"; else echo "[WARN] patch fail $F"; fi
+          }
+          patchde /usr/share/applications/firefox.desktop
+          patchde /usr/share/applications/google-chrome.desktop
+          command -v firefox > /dev/null 2>&1 && echo "[OK] firefox installed" || echo "[FAIL] firefox nahi mila"
+          command -v google-chrome > /dev/null 2>&1 && echo "[OK] chrome installed" || echo "[WARN] chrome nahi mila"
+
+      - name: '4 Desktop look'
+        shell: bash
+        run: |
+          set +e
+          TH=Adwaita-dark
+          for t in Materia-dark-compact Materia-dark Arc-Dark Arc-Darker Adwaita-dark; do
+            if [ -d "/usr/share/themes/$t" ]; then TH=$t; break; fi
           done
-          ICON_NAME=""
-          for d in /usr/share/icons/Win11*; do
-            true
-            [ -d "$d" ] && ICON_NAME=$(basename "$d") && break
-          done
-          [ -z "$GTK_NAME" ] && GTK_NAME="Adwaita-dark"
-          [ -z "$ICON_NAME" ] && ICON_NAME="Adwaita"
-          echo "[OK] theme=$GTK_NAME icons=$ICON_NAME"
-          XD="$HOME/.config/xfce4/xfconf/xfce-perchannel-xml"
-          mkdir -p "$XD"
+          IC=Papirus-Dark
+          if [ ! -d "/usr/share/icons/$IC" ]; then IC=Adwaita; fi
+          echo "[OK] theme = $TH"
+          echo "[OK] icons = $IC"
+          echo "THEME=$TH" >> $GITHUB_ENV
+          echo "ICON=$IC" >> $GITHUB_ENV
+          mkdir -p ~/.config/xfce4/xfconf/xfce-perchannel-xml
           printf '%s\n' \
           '<?xml version="1.0" encoding="UTF-8"?>' \
           '<channel name="xsettings" version="1.0">' \
           '  <property name="Net" type="empty">' \
-          '    <property name="ThemeName" type="string" value="GTKNAME"/>' \
-          '    <property name="IconThemeName" type="string" value="ICONNAME"/>' \
+          '    <property name="ThemeName" type="string" value="THEMEVAL"/>' \
+          '    <property name="IconThemeName" type="string" value="ICONVAL"/>' \
+          '    <property name="EnableEventSounds" type="bool" value="false"/>' \
           '  </property>' \
-          '</channel>' > "$XD/xsettings.xml"
+          '</channel>' | sed -e "s/THEMEVAL/$TH/" -e "s/ICONVAL/$IC/" > ~/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml
           printf '%s\n' \
           '<?xml version="1.0" encoding="UTF-8"?>' \
           '<channel name="xfwm4" version="1.0">' \
           '  <property name="general" type="empty">' \
-          '    <property name="theme" type="string" value="GTKNAME"/>' \
+          '    <property name="theme" type="string" value="THEMEVAL"/>' \
+          '    <property name="use_compositing" type="bool" value="true"/>' \
           '    <property name="button_layout" type="string" value="O|HMC"/>' \
+          '    <property name="title_alignment" type="string" value="center"/>' \
           '  </property>' \
-          '</channel>' > "$XD/xfwm4.xml"
-          printf '%s\n' \
-          '<?xml version="1.0" encoding="UTF-8"?>' \
-          '<channel name="xfce4-panel" version="1.0">' \
-          '  <property name="panels" type="array">' \
-          '    <value type="int" value="1"/>' \
-          '  </property>' \
-          '  <property name="panels-dark-mode" type="bool" value="true"/>' \
-          '  <property name="panel-1" type="empty">' \
-          '    <property name="position" type="string" value="p=6;x=0;y=0"/>' \
-          '    <property name="length" type="uint" value="100"/>' \
-          '    <property name="size" type="uint" value="42"/>' \
-          '    <property name="background-style" type="uint" value="1"/>' \
-          '    <property name="plugin-ids" type="array">' \
-          '      <value type="int" value="1"/>' \
-          '      <value type="int" value="2"/>' \
-          '      <value type="int" value="3"/>' \
-          '      <value type="int" value="4"/>' \
-          '      <value type="int" value="5"/>' \
-          '      <value type="int" value="6"/>' \
-          '    </property>' \
-          '  </property>' \
-          '  <property name="plugins" type="empty">' \
-          '    <property name="plugin-1" type="string" value="whiskermenu"/>' \
-          '    <property name="plugin-2" type="string" value="separator"/>' \
-          '    <property name="plugin-3" type="string" value="tasklist"/>' \
-          '    <property name="plugin-4" type="string" value="separator"/>' \
-          '    <property name="plugin-5" type="string" value="systray"/>' \
-          '    <property name="plugin-6" type="string" value="clock"/>' \
-          '  </property>' \
-          '  <property name="plugin-2" type="empty">' \
-          '    <property name="expand" type="bool" value="true"/>' \
-          '  </property>' \
-          '  <property name="plugin-4" type="empty">' \
-          '    <property name="expand" type="bool" value="true"/>' \
-          '  </property>' \
-          '  <property name="plugin-3" type="empty">' \
-          '    <property name="show-labels" type="bool" value="false"/>' \
-          '    <property name="grouping" type="uint" value="1"/>' \
-          '    <property name="flat-buttons" type="bool" value="true"/>' \
-          '  </property>' \
-          '</channel>' > "$XD/xfce4-panel.xml"
-          sed -i "s|GTKNAME|$GTK_NAME|g; s|ICONNAME|$ICON_NAME|g" "$XD/xsettings.xml" "$XD/xfwm4.xml"
-          mkdir -p "$HOME/Pictures"
-          if convert -size 1920x1080 gradient:'#0b2a4a-#1b6ac9' "$HOME/Pictures/win11.png" 2>/dev/null; then
+          '</channel>' | sed -e "s/THEMEVAL/$TH/" > ~/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml
+          W=${RES%x*}; H=${RES#*x}
+          if command -v convert > /dev/null 2>&1; then CM=convert; else CM=magick; fi
+          $CM -size ${W}x${H} gradient:'#0f2027-#203a43-#2c5364' /tmp/wall-base.png 2>/dev/null
+          if [ -f /tmp/wall-base.png ]; then
+            sudo mkdir -p /usr/share/backgrounds
+            sudo cp /tmp/wall-base.png /usr/share/backgrounds/cloudpc-base.png
             printf '%s\n' \
             '<?xml version="1.0" encoding="UTF-8"?>' \
             '<channel name="xfce4-desktop" version="1.0">' \
             '  <property name="backdrop" type="empty">' \
             '    <property name="screen0" type="empty">' \
             '      <property name="monitor0" type="empty">' \
-            '        <property name="image-path" type="string" value="WALLPATH"/>' \
+            '        <property name="image-path" type="string" value="/usr/share/backgrounds/cloudpc-base.png"/>' \
+            '        <property name="last-image" type="string" value="/usr/share/backgrounds/cloudpc-base.png"/>' \
             '        <property name="image-style" type="int" value="5"/>' \
             '      </property>' \
             '    </property>' \
             '  </property>' \
-            '</channel>' > "$XD/xfce4-desktop.xml"
-            sed -i "s|WALLPATH|$HOME/Pictures/win11.png|g" "$XD/xfce4-desktop.xml"
-            echo "[OK] wallpaper"
+            '</channel>' > ~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml
+            echo "[OK] wallpaper set"
           fi
-          echo "[OK] Windows 11 look applied"
-
-      - name: Browsers install
-        shell: bash
-        run: |
-          set +e
-          if [ "$BROWSERS" != "yes" ]; then echo "browsers skip"; exit 0; fi
-          echo "--- Firefox non-snap ---"
-          sudo install -d -m 0755 /etc/apt/keyrings
-          wget -q https://packages.mozilla.org/apt/repo-signing-key.gpg -O- | sudo tee /etc/apt/keyrings/packages.mozilla.org.asc > /dev/null
-          echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main" | sudo tee -a /etc/apt/sources.list.d/mozilla.list > /dev/null
-          printf 'Package: *\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n' | sudo tee /etc/apt/preferences.d/mozilla > /dev/null
-          sudo apt-get update -qq
-          sudo apt-get remove -y -qq firefox 2>/dev/null || true
-          sudo apt-get install -y -qq firefox 2>&1 | tail -3
-          if ! which firefox >/dev/null 2>&1; then
-            wget -q -O /tmp/ff.tar.xz "https://download.mozilla.org/?product=firefox-latest&os=linux64&lang=en-US"
-            sudo tar -xJf /tmp/ff.tar.xz -C /opt/ && sudo ln -sf /opt/firefox/firefox /usr/local/bin/firefox
-          fi
-          which firefox >/dev/null 2>&1 && echo "[OK] firefox" || echo "[FAIL] firefox"
-          echo "--- Chrome ---"
-          wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-          sudo apt-get install -y -qq /tmp/chrome.deb 2>&1 | tail -3 || sudo apt-get -y -qq -f install 2>&1 | tail -2
-          which google-chrome >/dev/null 2>&1 && echo "[OK] chrome" || echo "[FAIL] chrome"
-          echo "--- no-sandbox patch ---"
-          for f in /usr/share/applications/google-chrome.desktop /usr/share/applications/firefox.desktop; do
-            [ -f "$f" ] || continue
-            grep -q -- '--no-sandbox' "$f" || sudo sed -i 's|^Exec=\(.*\)|Exec=\1 --no-sandbox --disable-dev-shm-usage|' "$f"
+          mkdir -p ~/.config/autostart ~/.config/plank/dock1/launchers
+          printf '%s\n' \
+          '[Desktop Entry]' \
+          'Name=Plank' \
+          'Exec=plank' \
+          'Terminal=false' \
+          'Type=Application' \
+          'X-XFCE-Autostart-Override=true' > ~/.config/autostart/plank.desktop
+          for a in firefox google-chrome exo-terminal-emulator thunar; do
+            for d in /usr/share/applications /var/lib/snapd/desktop/applications; do
+              if [ -f "$d/$a.desktop" ]; then
+                printf '%s\n' \
+                '[PlankItemsDockItemPreferences]' \
+                "Launcher=file://$d/$a.desktop" > ~/.config/plank/dock1/launchers/$a.dockitem
+                break
+              fi
+            done
           done
-          if [ -x /opt/firefox/firefox ] && [ ! -f /usr/share/applications/firefox.desktop ]; then
-            printf '%s\n' '[Desktop Entry]' 'Name=Firefox' 'Exec=/opt/firefox/firefox --no-sandbox --disable-dev-shm-usage %u' 'Terminal=false' 'Type=Application' 'Categories=Network;WebBrowser;' > /tmp/ff.desktop
-            sudo cp /tmp/ff.desktop /usr/share/applications/firefox.desktop
-          fi
-          sudo update-desktop-database 2>/dev/null || true
-          echo "--- launch test ---"
-          which google-chrome >/dev/null 2>&1 && { timeout 25 google-chrome --headless --no-sandbox --disable-gpu --dump-dom about:blank > /tmp/ct.html 2>&1; [ -s /tmp/ct.html ] && echo "[OK] chrome chala" || echo "[WARN] chrome test fail"; }
-          which firefox >/dev/null 2>&1 && { timeout 25 firefox --headless --screenshot /tmp/ff.png about:blank > /tmp/ft.log 2>&1; [ -f /tmp/ff.png ] && echo "[OK] firefox chala" || echo "[WARN] firefox test fail"; }
+          ls ~/.config/plank/dock1/launchers/ | sed 's/^/[dock] /'
 
-      - name: Software and extras
-        shell: bash
-        continue-on-error: true
-        run: |
-          set +e
-          if [ "$PACK" = "essential" ] || [ "$PACK" = "all" ]; then
-            true
-            sudo apt-get install -y -qq p7zip-full vlc gedit file-roller thunar-archive-plugin 2>&1 | tail -2
-          fi
-          if [ "$PACK" = "dev" ] || [ "$PACK" = "all" ]; then
-            sudo apt-get install -y -qq python3-pip nodejs npm ffmpeg build-essential 2>&1 | tail -2
-            wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /tmp/ms.gpg
-            sudo install -o root -g root -m 644 /tmp/ms.gpg /etc/apt/trusted.gpg.d/
-            echo "deb [arch=amd64] https://packages.microsoft.com/repos/code stable main" | sudo tee /etc/apt/sources.list.d/vscode.list > /dev/null
-            sudo apt-get update -qq && sudo apt-get install -y -qq code 2>&1 | tail -2
-          fi
-          if [ "$WINE" = "yes" ]; then
-            sudo dpkg --add-architecture i386 2>/dev/null || true
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq wine64 2>&1 | tail -2 || true
-            wine --version 2>/dev/null || echo "[WARN] wine nahi"
-          fi
-          echo "[OK] software done"
-
-      - name: Display and network
+      - name: '5 Display and network'
         shell: bash
         run: |
           set +e
           W=$(echo "$RES" | cut -d'x' -f1); H=$(echo "$RES" | cut -d'x' -f2)
+          PW=$(head -c 12 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 12)
+          printf '%s\n' "runner:$PW" > /tmp/pwfile
+          sudo chpasswd < /tmp/pwfile
+          echo "RDPPW=$PW" >> $GITHUB_ENV
+          echo "[OK] password set"
+          printf '%s\n' 'startxfce4' > ~/.xsession
+          sudo sed -i 's/^allowed_users=.*/allowed_users=anybody/' /etc/xrdp/sesman.ini 2>/dev/null
+          sudo service xrdp restart 2>/dev/null || sudo /usr/sbin/xrdp 2>/dev/null || true
+          sleep 2
           rm -rf /tmp/.X99-lock
           nohup Xvfb :99 -screen 0 ${W}x${H}x24 -ac +extension GLX +render -noreset > /tmp/xvfb.log 2>&1 &
           sleep 4
           export DISPLAY=:99
-          if command -v dbus-launch >/dev/null 2>&1; then
-            eval "$(dbus-launch --sh-syntax)" 2>/dev/null || true
-            echo "[OK] dbus session ready"
+          export XDG_RUNTIME_DIR=/tmp/xdg
+          mkdir -p /tmp/xdg && chmod 700 /tmp/xdg
+          if command -v dbus-launch > /dev/null 2>&1; then
+            eval "$(dbus-launch --sh-syntax)" 2>/dev/null
+            echo "[OK] dbus ready"
           fi
           nohup startxfce4 > /tmp/xfce.log 2>&1 &
-          sleep 10
+          sleep 12
           nohup x11vnc -display :99 -forever -shared -nopw -rfbport 5900 -quiet > /tmp/x11vnc.log 2>&1 &
           sleep 3
           nohup websockify --web=/usr/share/novnc 6080 localhost:5900 > /tmp/novnc.log 2>&1 &
           sleep 3
-          pgrep -x Xvfb > /dev/null   && echo "[OK] Xvfb"   || echo "[FAIL] Xvfb"
+          pgrep -x Xvfb > /dev/null && echo "[OK] Xvfb" || echo "[FAIL] Xvfb"
           pgrep -x x11vnc > /dev/null && echo "[OK] x11vnc" || echo "[FAIL] x11vnc"
           XFCE_UP=0
-          if pgrep -f startxfce4 >/dev/null || pgrep -x xfce4-session >/dev/null || pgrep -x xfdesktop >/dev/null || pgrep -x xfce4-panel >/dev/null; then
-            XFCE_UP=1
-          fi
+          if pgrep -f startxfce4 > /dev/null || pgrep -x xfce4-session > /dev/null || pgrep -x xfdesktop > /dev/null || pgrep -x xfce4-panel > /dev/null; then XFCE_UP=1; fi
           if [ "$XFCE_UP" = "1" ]; then
             echo "[OK] XFCE chal raha hai"
           else
-            echo "[WARN] XFCE pehli baar nahi chala - dobara try"
             nohup startxfce4 > /tmp/xfce2.log 2>&1 &
-            sleep 12
-            if pgrep -f startxfce4 >/dev/null || pgrep -x xfce4-session >/dev/null || pgrep -x xfdesktop >/dev/null || pgrep -x xfce4-panel >/dev/null; then
+            sleep 14
+            if pgrep -f startxfce4 > /dev/null || pgrep -x xfce4-session > /dev/null || pgrep -x xfdesktop > /dev/null || pgrep -x xfce4-panel > /dev/null; then
               XFCE_UP=1
-              echo "[OK] XFCE doosri koshish mein chal gaya"
+              echo "[OK] XFCE doosri koshish me chal gaya"
             else
-              echo "[FAIL] XFCE nahi chala - theme live apply skip"
-              tail -5 /tmp/xfce.log 2>/dev/null || true
+              echo "[FAIL] XFCE nahi chala"
+              tail -5 /tmp/xfce.log 2>/dev/null
             fi
           fi
-          if [ "$XFCE_UP" = "1" ] && [ -n "$GTK_THEME_NAME" ] && [ "$GTK_THEME_NAME" != "Adwaita-dark" ]; then
-            timeout 10 xfconf-query -c xsettings -p /Net/ThemeName     -s "$GTK_THEME_NAME" 2>/dev/null || true
-            timeout 10 xfconf-query -c xsettings -p /Net/IconThemeName -s "$ICON_THEME_NAME" 2>/dev/null || true
-            timeout 10 xfconf-query -c xfwm4     -p /general/theme     -s "$GTK_THEME_NAME" 2>/dev/null || true
-            echo "[OK] theme live apply : $GTK_THEME_NAME"
-          fi
-          timeout 10 xfce4-panel -r 2>/dev/null || true
           echo "--- Tailscale ---"
           timeout 180 curl -fsSL --max-time 150 https://tailscale.com/install.sh | sh 2>&1 | tail -2
           K="${{ secrets.TAILSCALE_AUTH_KEY }}"
-          if echo "$K" | grep -q '^tskey-auth-'; then
-            timeout 120 sudo tailscale up --authkey="$K" --hostname="winux-$GITHUB_RUN_ID" --accept-routes 2>&1 | tail -3
-            sleep 8
-          else
-            timeout 150 sudo tailscale up --hostname="winux-$GITHUB_RUN_ID" > /tmp/ts.log 2>&1 &
-            sleep 20
-            L=$(grep -o 'https://login.tailscale.com/[^ ]*' /tmp/ts.log | head -1)
-            if [ -n "$L" ]; then echo "TAILSCALE LOGIN LINK: $L"; else echo "[X] link nahi mila"; fi
-          fi
           IP=""
-          for i in $(seq 1 12); do
-            IP=$(timeout 20 sudo tailscale ip -4 2>/dev/null | grep '^100\.' | head -1)
-            [ -n "$IP" ] && break
-            sleep 8
-          done
-          if [ -n "$IP" ]; then echo "TS_IP=$IP" >> $GITHUB_ENV; echo "[OK] Tailscale IP $IP"; else echo "[WARN] IP nahi mila"; fi
+          if echo "$K" | grep -q '^tskey-auth-'; then
+            timeout 120 sudo tailscale up --authkey="$K" --hostname="cloudpc-$GITHUB_RUN_ID" --accept-routes 2>&1 | tail -3
+            for i in $(seq 1 12); do
+              IP=$(timeout 20 sudo tailscale ip -4 2>/dev/null | grep '^100\.' | head -1)
+              if [ -n "$IP" ]; then break; fi
+              sleep 8
+            done
+            if [ -n "$IP" ]; then echo "TS_IP=$IP" >> $GITHUB_ENV; echo "[OK] Tailscale IP = $IP"; else echo "[WARN] Tailscale IP nahi mila"; fi
+          else
+            echo "[WARN] TAILSCALE_AUTH_KEY galat ya nahi hai - browser link use karo"
+          fi
           if [ "$WEB" = "yes" ]; then
-            curl -sL --max-time 120 -o /tmp/cf https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+            timeout 150 curl -sL --max-time 120 -o /tmp/cf https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
             chmod +x /tmp/cf
             nohup /tmp/cf tunnel --url http://127.0.0.1:6080 --no-autoupdate > /tmp/cf.log 2>&1 &
             LINK=""
             for i in $(seq 1 20); do
               sleep 4
               LINK=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' /tmp/cf.log | head -1)
-              [ -n "$LINK" ] && break
+              if [ -n "$LINK" ]; then break; fi
             done
-            if [ -n "$LINK" ]; then echo "CF_LINK=$LINK" >> $GITHUB_ENV; echo "[OK] browser link bana"; else echo "[X] tunnel nahi bana"; fi
+            if [ -n "$LINK" ]; then echo "CF_LINK=$LINK" >> $GITHUB_ENV; echo "[OK] browser link mil gaya"; else echo "[WARN] tunnel nahi bana"; fi
           fi
 
-      - name: Health check
+      - name: '6 Health check'
         shell: bash
         run: |
-          PW=$(cat /tmp/PW 2>/dev/null || echo "$PC_PASSWORD")
-          chk(){ if [ "$1" = "0" ]; then echo "  [OK]   $2"; else echo "  [FAIL] $2"; fi; }
-          GTK_DET=$(ls /usr/share/themes 2>/dev/null | grep -i win11 | head -1)
-          ICO_DET=$(ls /usr/share/icons  2>/dev/null | grep -i win11 | head -1)
-          FF_V=$(firefox --version 2>/dev/null | head -1)
-          CH_V=$(google-chrome --version 2>/dev/null | head -1)
-          echo ""
-          echo "############# HEALTH CHECK #############"
-          [ -n "$GTK_DET" ]; chk $? "Win11 theme  : ${GTK_DET:-NAHI MILA}"
-          [ -n "$ICO_DET" ]; chk $? "Win11 icons  : ${ICO_DET:-NAHI MILE}"
-          [ -f "$HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml" ];   chk $? "theme config"
-          [ -f "$HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml" ]; chk $? "taskbar config"
-          which firefox       >/dev/null 2>&1; chk $? "Firefox      : ${FF_V:-nahi}"
-          which google-chrome >/dev/null 2>&1; chk $? "Chrome       : ${CH_V:-nahi}"
-          pgrep -x Xvfb       >/dev/null;      chk $? "display      : Xvfb :99"
-          pgrep -x x11vnc     >/dev/null;      chk $? "VNC          : port 5900"
-          [ -f "$HOME/Pictures/win11.png" ];   chk $? "wallpaper"
-          echo "########################################"
-          echo "  USER     : runner"
-          echo "  PASSWORD : $PW"
-          [ -n "$TS_IP" ]   && echo "  RDP      : ${TS_IP}:3389"
-          [ -n "$CF_LINK" ] && echo "  BROWSER  : ${CF_LINK}/vnc.html?autoconnect=true&resize=scale"
-          echo ""
-          printf 'WINUX CLOUD PC\nUSER: runner\nPASSWORD: %s\nRDP: %s:3389\nBROWSER: %s/vnc.html?autoconnect=true&resize=scale\n' "$PW" "$TS_IP" "$CF_LINK" > /tmp/CONNECT.txt
+          set +e
+          export DISPLAY=:99
+          echo "=============================================="
+          echo "  HEALTH CHECK"
+          echo "=============================================="
+          chk() {
+            if [ "$1" = "0" ]; then echo "[OK] $2"; else echo "[FAIL] $2"; fi
+          }
+          pgrep -x Xvfb > /dev/null; chk $? "Xvfb display"
+          pgrep -x x11vnc > /dev/null; chk $? "x11vnc :5900"
+          pgrep -f websockify > /dev/null; chk $? "websockify :6080"
+          pgrep -x xfce4-session > /dev/null || pgrep -x xfdesktop > /dev/null; chk $? "XFCE desktop"
+          command -v firefox > /dev/null 2>&1; chk $? "Firefox"
+          command -v google-chrome > /dev/null 2>&1; chk $? "Chrome"
+          [ -d "/usr/share/themes/${THEME:-Adwaita-dark}" ]; chk $? "Theme ${THEME:-Adwaita-dark}"
+          [ -d "/usr/share/icons/${ICON:-Adwaita}" ]; chk $? "Icons ${ICON:-Adwaita}"
+          W=${RES%x*}; H=${RES#*x}
+          if command -v convert > /dev/null 2>&1; then CM=convert; else CM=magick; fi
+          IPX=${TS_IP:-not-set}
+          PWX=${RDPPW:-not-set}
+          LX=${CF_LINK:-not-set}
+          $CM -size ${W}x${H} gradient:'#0f2027-#203a43-#2c5364' \
+            -gravity North -fill '#00d4ff' -pointsize 48 -annotate +0+70 'CLOUD PC' \
+            -fill '#ffffff' -pointsize 26 -annotate +0+140 'Linux Desktop | XFCE' \
+            -fill '#9fe6ff' -pointsize 22 -annotate +0+230 "RDP  $IPX:3389" \
+            -fill '#ffffff' -pointsize 22 -annotate +0+270 'USER  runner' \
+            -fill '#ffffff' -pointsize 22 -annotate +0+310 "PASS  $PWX" \
+            -fill '#7CFFB2' -pointsize 20 -annotate +0+390 "WEB  $LX" \
+            -fill '#888888' -pointsize 18 -annotate +0+460 'Firefox + Chrome ready' \
+            /tmp/cloudpc-info.png 2>/dev/null
+          if [ -f /tmp/cloudpc-info.png ]; then
+            sudo mkdir -p /usr/share/backgrounds
+            sudo cp /tmp/cloudpc-info.png /usr/share/backgrounds/cloudpc-info.png
+            timeout 10 xfconf-query -c xfce4-desktop -p /backdrop/screen0/monitor0/image-path -s /usr/share/backgrounds/cloudpc-info.png 2>/dev/null
+            timeout 10 xfconf-query -c xfce4-desktop -p /backdrop/screen0/monitor0/last-image -s /usr/share/backgrounds/cloudpc-info.png 2>/dev/null
+            echo "[OK] desktop pe info likh diya"
+          fi
+          timeout 10 xfconf-query -c xsettings -p /Net/ThemeName -s "${THEME:-Adwaita-dark}" 2>/dev/null
+          timeout 10 xfconf-query -c xsettings -p /Net/IconThemeName -s "${ICON:-Adwaita}" 2>/dev/null
+          timeout 10 xfconf-query -c xfwm4 -p /general/theme -s "${THEME:-Adwaita-dark}" 2>/dev/null
+          timeout 10 xfce4-panel -r 2>/dev/null
+          echo "=============================================="
+          echo "  LINUX PC TAIYAR HAI"
+          echo "=============================================="
+          if [ -n "$TS_IP" ]; then
+            echo "  RDP  : $TS_IP:3389"
+            echo "  USER : runner"
+            echo "  PASS : $RDPPW"
+          else
+            echo "  RDP  : Tailscale key nahi hai, browser use karo"
+          fi
+          if [ -n "$CF_LINK" ]; then
+            echo "  WEB  : $CF_LINK/vnc.html?autoconnect=true&resize=scale"
+          fi
+          echo "  TIME : ${{ inputs.hours }} ghante"
+          echo "=============================================="
 
-      - name: Save connection
-        uses: actions/upload-artifact@v4
-        with:
-          name: winux-connection
-          path: /tmp/CONNECT.txt
-
-      - name: Keep alive
+      - name: '7 Keep alive'
         shell: bash
         run: |
-          H="${{ inputs.hours }}"
-          case "$H" in ''|*[!0-9]*) H=5;; esac
-          [ "$H" -gt 5 ] && H=5
-          [ "$H" -lt 1 ] && H=1
-          END=$(( $(date +%s) + H * 3600 ))
-          echo "PC chalega $H ghante"
-          N=0
-          while [ $(date +%s) -lt $END ]; do
-            sleep 60
-            N=$((N+1))
-            if [ $((N % 5)) -eq 0 ]; then
-              LEFT=$(( END - $(date +%s) ))
-              IP=$(sudo tailscale ip -4 2>/dev/null | grep '^100\.' | head -1)
-              echo "[alive $((LEFT/3600))h $(( (LEFT%3600)/60 ))m bache] IP: $IP | user: runner | pass: $(cat /tmp/PW 2>/dev/null)"
-            fi
+          set +e
+          H=${{ inputs.hours }}
+          T=$((H*3600)); S=300
+          echo "[OK] $H ghante chalega"
+          while [ $T -gt 0 ]; do
+            if [ $T -lt $S ]; then S=$T; fi
+            sleep $S
+            T=$((T-S))
+            echo "[alive] bache $((T/60)) min  |  $(date +%H:%M:%S)"
           done
-          echo "Time khatam."
+          echo "TIME OVER"
 
-  # ============================================================
-  #  ASLI WINDOWS 11
-  # ============================================================
   windows:
     if: inputs.os == 'windows11'
-    name: Windows 11 Cloud PC
     runs-on: windows-latest
-    timeout-minutes: 355
-
     steps:
 
-      - name: RDP setup and tweaks
+      - name: '1 User and password'
         shell: pwsh
         run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1 -Force
-          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389 | Out-Null
-          Restart-Service -Name TermService -Force
-          $p = "${{ inputs.pc_password }}".Trim()
-          if ($p.Length -lt 8) {
-            $A = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789@#%*!'.ToCharArray()
-            $p = -join (1..14 | ForEach-Object { $A | Get-Random })
-          }
-          $secure = ConvertTo-SecureString $p -AsPlainText -Force
-          if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) { Set-LocalUser -Name "RDP" -Password $secure }
-          else { New-LocalUser -Name "RDP" -Password $secure -AccountNeverExpires | Out-Null }
-          Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
-          "RDP_USER=RDP" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-          "RDP_PASS=$p"  | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-          powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c 2>$null
-          powercfg /hibernate off 2>$null
-          $ui = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
-          New-ItemProperty -Path $ui -Name 'AppsUseLightTheme' -Value 0 -PropertyType DWord -Force | Out-Null
-          New-ItemProperty -Path $ui -Name 'SystemUsesLightTheme' -Value 0 -PropertyType DWord -Force | Out-Null
-          $adv = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
-          New-ItemProperty -Path $adv -Name 'TaskbarSmallIcons' -Value 1 -PropertyType DWord -Force | Out-Null
-          New-ItemProperty -Path $adv -Name 'ShowTaskViewButton' -Value 0 -PropertyType DWord -Force | Out-Null
-          New-ItemProperty -Path $adv -Name 'ShowCortanaButton' -Value 0 -PropertyType DWord -Force | Out-Null
-          New-ItemProperty -Path $adv -Name 'TaskbarDa' -Value 0 -PropertyType DWord -Force | Out-Null
-          New-ItemProperty -Path $adv -Name 'Hidden' -Value 1 -PropertyType DWord -Force | Out-Null
-          New-ItemProperty -Path $adv -Name 'HideFileExt' -Value 0 -PropertyType DWord -Force | Out-Null
-          foreach ($s in @('wuauserv','UsoSvc','WSearch','SysMain')) {
-            Set-Service -Name $s -StartupType Disabled -ErrorAction SilentlyContinue
-            Stop-Service -Name $s -Force -ErrorAction SilentlyContinue
-          }
-          $os = Get-CimInstance Win32_OperatingSystem
-          Write-Host "OS   : $($os.Caption)"
-          Write-Host "RAM  : $([math]::Round($os.TotalVisibleMemorySize/1MB,1)) GB"
-          Write-Host "CPU  : $((Get-CimInstance Win32_Processor | Select-Object -First 1).Name)"
-          Write-Host "[OK] RDP ready"
+          $p = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 14 | ForEach-Object { [char]$_ })
+          net user RDP "$p" /add /y
+          net localgroup administrators RDP /add
+          net localgroup "Remote Desktop Users" RDP /add
+          Add-Content -Path $env:GITHUB_ENV -Value "RDPPW=$p"
+          Write-Output "[OK] user RDP ban gaya"
 
-      - name: Tailscale connect
+      - name: '2 Enable RDP'
+        shell: pwsh
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'UserAuthentication' -Value 0
+          Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'
+          netsh advfirewall firewall add rule name='RDP3389' dir=in action=allow protocol=TCP localport=3389
+          Restart-Service -Name TermService -Force -ErrorAction SilentlyContinue
+          Write-Output "[OK] RDP on ho gaya"
+
+      - name: '3 Tailscale'
         shell: pwsh
         run: |
           $msi = "$env:TEMP\tailscale.msi"
-          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile $msi
-          Start-Process msiexec.exe -ArgumentList "/i", $msi, "/quiet", "/norestart" -Wait
-          Remove-Item $msi -Force -ErrorAction SilentlyContinue
-          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
-          $k = "${{ secrets.TAILSCALE_AUTH_KEY }}".Trim()
-          $pcName = "gh-pc-$env:GITHUB_RUN_ID"
-          if ($k -match '^tskey-auth-' -and $k.Length -gt 30) {
-            & $ts up "--authkey=$k" "--hostname=$pcName" 2>&1 | Out-Host
-            Start-Sleep -Seconds 12
-            $st = & $ts status 2>&1 | Out-String
-            if ($st -match 'NeedsLogin|invalid key|Logged out') { Write-Host "[FAIL] key kaam nahi - link mode"; $k = "" }
-          }
-          if ($k -notmatch '^tskey-auth-') {
-            $out = "$env:TEMP\ts_out.txt"
-            $err = "$env:TEMP\ts_err.txt"
-            Remove-Item $out,$err -ErrorAction SilentlyContinue
-            Start-Process -FilePath $ts -ArgumentList "up","--hostname=$pcName" -RedirectStandardOutput $out -RedirectStandardError $err -WindowStyle Hidden -PassThru | Out-Null
-            $link = $null
-            for ($i=0; $i -lt 12; $i++) {
-              Start-Sleep -Seconds 5
-              $log = ""
-              if (Test-Path $out) { $log += (Get-Content $out -Raw -ErrorAction SilentlyContinue) }
-              if (Test-Path $err) { $log += (Get-Content $err -Raw -ErrorAction SilentlyContinue) }
-              $m = [regex]::Match($log, 'https://login\.tailscale\.com/\S+')
-              if ($m.Success) { $link = $m.Value.Trim(); break }
+          Invoke-WebRequest -Uri 'https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi' -OutFile $msi -UseBasicParsing
+          Start-Process msiexec.exe -ArgumentList '/i', $msi, '/quiet', '/norestart' -Wait
+          Start-Sleep -Seconds 5
+          $ts = 'C:\Program Files\Tailscale\tailscale.exe'
+          $k = '${{ secrets.TAILSCALE_AUTH_KEY }}'
+          if ($k -like 'tskey-auth-*') {
+            $o = "$env:TEMP\ts_out.txt"
+            $e = "$env:TEMP\ts_err.txt"
+            $a = @('up', "--authkey=$k", "--hostname=winpc-$env:GITHUB_RUN_ID", '--accept-routes')
+            Start-Process -FilePath $ts -ArgumentList $a -RedirectStandardOutput $o -RedirectStandardError $e -NoNewWindow -Wait
+            Get-Content $o, $e -ErrorAction SilentlyContinue | Select-Object -Last 5
+            $ip = ''
+            for ($i = 0; $i -lt 12; $i++) {
+              $ip = (& $ts ip -4 2>$null | Select-Object -First 1)
+              if ($ip) { break }
+              Start-Sleep -Seconds 10
             }
-            if ($link) { Write-Host "TAILSCALE LOGIN LINK: $link" } else { Write-Host "[X] link nahi mila" }
-          }
-          $ip = $null
-          for ($i=0; $i -lt 12; $i++) {
-            Start-Sleep -Seconds 10
-            $ip = (& $ts "ip" "-4" 2>$null | Select-String -Pattern '^100\.' | Select-Object -First 1)
-            if ($ip) { break }
-          }
-          if ($ip) {
-            $ip = "$ip".Trim()
-            "TS_IP=$ip" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-            Write-Host "[OK] Tailscale IP $ip"
-          } else { Write-Host "[WARN] IP nahi mila" }
-
-      - name: Software and OmniRush
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $pack = "${{ inputs.software_pack }}"
-          $br   = "${{ inputs.browsers }}"
-          function Inst($id, $name) {
-            winget install --id $id -e --accept-source-agreements --accept-package-agreements --silent 2>&1 | Out-Null
-            if ($LASTEXITCODE -eq 0) { Write-Host "  [OK] $name" } else { Write-Host "  [skip] $name" }
-          }
-          if ($br -eq 'yes') { Inst "Google.Chrome" "Chrome"; Inst "Mozilla.Firefox" "Firefox" }
-          if ($pack -in @('essential','all')) {
-            Inst "7zip.7zip" "7-Zip"
-            Inst "VideoLAN.VLC" "VLC"
-            Inst "Notepad++.Notepad++" "Notepad++"
-            Inst "Microsoft.PowerToys" "PowerToys"
-          }
-          if ($pack -in @('dev','all')) {
-            Inst "Microsoft.VisualStudioCode" "VS Code"
-            Inst "Git.Git" "Git"
-            Inst "OpenJS.NodeJS.LTS" "Node.js"
-            Inst "Python.Python.3.12" "Python"
-          }
-          if ("${{ inputs.omnirush }}" -eq 'yes') {
-            $url = $null
-            try {
-              $raw = (Invoke-RestMethod -Uri "https://github.com/omnirush-ai/omnirush-gui/releases/latest/download/latest.yml" -ErrorAction Stop) -join "`n"
-              $m = [regex]::Match($raw, 'url:\s*(\S+\.exe)')
-              if ($m.Success) { $url = "https://github.com/omnirush-ai/omnirush-gui/releases/latest/download/$($m.Groups[1].Value)" }
-            } catch { }
-            if (-not $url) { $url = "https://github.com/omnirush-ai/omnirush-gui/releases/download/v3.0.2/omnirush-win-x64-3.0.2.exe" }
-            $exe = "$env:USERPROFILE\Desktop\OmniRush.exe"
-            try {
-              Invoke-WebRequest -Uri $url -OutFile $exe -ErrorAction Stop
-              Start-Process -FilePath $exe -ArgumentList "/S" -Wait -ErrorAction SilentlyContinue
-              Write-Host "  [OK] OmniRush"
-            } catch { Write-Host "  [skip] OmniRush download fail" }
-          }
-          Write-Host "[OK] software done"
-
-      - name: Browser access link
-        if: inputs.web_access == 'yes'
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $dir = "$env:USERPROFILE\Desktop\WebShare"
-          New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          $ip = $env:TS_IP
-          $h = "<html><body style='background:#0f1115;color:#e6e6ee;font-family:sans-serif;padding:24px'>"
-          $h += "<h1>Cloud PC</h1>"
-          $h += "<p>User : <b>$env:RDP_USER</b></p>"
-          $h += "<p>Password : <b>$env:RDP_PASS</b></p>"
-          $h += "<p>RDP : <b>${ip}:3389</b></p>"
-          $h += "<p>Hours : <b>${{ inputs.hours }}</b></p>"
-          $h += "</body></html>"
-          $h | Out-File "$dir\index.html" -Encoding utf8
-          Start-Process -FilePath "python" -ArgumentList "-m","http.server","8099" -WorkingDirectory $dir -WindowStyle Hidden -PassThru | Out-Null
-          Start-Sleep -Seconds 3
-          $cf = "$env:TEMP\cloudflared.exe"
-          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile $cf
-          $cfOut = "$env:TEMP\cf.log"
-          $cfErr = "$env:TEMP\cf_err.log"
-          Remove-Item $cfOut,$cfErr -ErrorAction SilentlyContinue
-          Start-Process -FilePath $cf -ArgumentList "tunnel","--url","http://127.0.0.1:8099","--no-autoupdate" -RedirectStandardOutput $cfOut -RedirectStandardError $cfErr -WindowStyle Hidden -PassThru | Out-Null
-          for ($i=0; $i -lt 20; $i++) {
-            Start-Sleep -Seconds 4
-            $log = ""
-            if (Test-Path $cfOut) { $log += (Get-Content $cfOut -Raw -ErrorAction SilentlyContinue) }
-            if (Test-Path $cfErr) { $log += (Get-Content $cfErr -Raw -ErrorAction SilentlyContinue) }
-            $m = [regex]::Match($log, 'https://[a-z0-9\-]+\.trycloudflare\.com')
-            if ($m.Success) {
-              "CF_LINK=$($m.Value)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-              Write-Host "BROWSER LINK: $($m.Value)"
-              break
+            if ($ip) {
+              Add-Content -Path $env:GITHUB_ENV -Value "TS_IP=$ip"
+              Write-Output "[OK] Tailscale IP = $ip"
+            } else {
+              Write-Output "[WARN] Tailscale IP nahi mila"
             }
+          } else {
+            Write-Output "[WARN] TAILSCALE_AUTH_KEY galat ya nahi hai"
           }
 
-      - name: Connection details
+      - name: '4 Health check'
         shell: pwsh
         run: |
-          Write-Host ""
-          Write-Host "====== CLOUD PC READY - ${{ inputs.hours }} HOURS ======"
-          Write-Host "  USER     : $env:RDP_USER"
-          Write-Host "  PASSWORD : $env:RDP_PASS"
-          if ($env:TS_IP)   { Write-Host "  RDP      : $($env:TS_IP):3389" }
-          if ($env:CF_LINK) { Write-Host "  BROWSER  : $env:CF_LINK" }
-          Write-Host "=================================================="
-          @("CLOUD PC", "USER: $env:RDP_USER", "PASSWORD: $env:RDP_PASS", "RDP: $($env:TS_IP):3389", "WEB: $env:CF_LINK") |
-            Out-File "$env:RUNNER_TEMP\CONNECT.txt" -Encoding utf8
-
-      - name: Save connection
-        uses: actions/upload-artifact@v4
-        with:
-          name: cloud-pc-connection
-          path: ${{ runner.temp }}\CONNECT.txt
-
-      - name: Keep alive
-        shell: pwsh
-        run: |
-          $h = "${{ inputs.hours }}"
-          if ($h -notmatch '^\d+$') { $h = 5 }
-          $h = [int]$h
-          if ($h -gt 5) { $h = 5 }
-          if ($h -lt 1) { $h = 1 }
-          $endAt = (Get-Date).AddHours($h)
-          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
-          Write-Host "PC chalega $h ghante"
-          $n = 0
-          while ((Get-Date) -lt $endAt) {
-            Start-Sleep -Seconds 60
-            $n++
-            if ($n % 5 -eq 0) {
-              $left = $endAt - (Get-Date)
-              $ip = (& $ts "ip" "-4" 2>$null | Select-String -Pattern '^100\.' | Select-Object -First 1)
-              if ($ip) { $ip = "$ip".Trim() }
-              Write-Host "[alive $([math]::Floor($left.TotalHours))h $($left.Minutes)m bache] IP: $ip | user: $env:RDP_USER | pass: $env:RDP_PASS"
-            }
+          Write-Output "=============================================="
+          Write-Output "  WINDOWS 11 PC TAIYAR HAI"
+          Write-Output "=============================================="
+          if ($env:TS_IP) {
+            Write-Output "  RDP  : $env:TS_IP:3389"
+          } else {
+            Write-Output "  RDP  : Tailscale key nahi hai"
           }
-          Write-Host "Time khatam."
+          Write-Output "  USER : RDP"
+          Write-Output "  PASS : $env:RDPPW"
+          Write-Output "  TIME : ${{ inputs.hours }} ghante"
+          Write-Output "=============================================="
+          $svc = Get-Service -Name TermService -ErrorAction SilentlyContinue
+          if ($svc) { Write-Output "[OK] TermService = $($svc.Status)" }
+          $u = Get-LocalUser -Name RDP -ErrorAction SilentlyContinue
+          if ($u) { Write-Output "[OK] user RDP maujood hai" }
+
+      - name: '5 Keep alive'
+        shell: pwsh
+        run: |
+          $h = [int]'${{ inputs.hours }}'
+          $end = (Get-Date).AddHours($h)
+          Write-Output "[OK] $h ghante chalega"
+          while ((Get-Date) -lt $end) {
+            Start-Sleep -Seconds 300
+            $left = $end - (Get-Date)
+            Write-Output "[alive] bache $([math]::Round($left.TotalMinutes)) min  |  $(Get-Date -Format 'HH:mm:ss')"
+          }
+          Write-Output "TIME OVER"

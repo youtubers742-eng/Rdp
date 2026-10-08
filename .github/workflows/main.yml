@@ -151,7 +151,8 @@ jobs:
             cd /tmp
           fi
           sudo gtk-update-icon-cache -f -q /usr/share/icons/Win11 2>/dev/null || true
-          GTK_NAME=""          for d in /usr/share/themes/Win11*Dark* /usr/share/themes/Win11*; do
+          GTK_NAME=""
+          for d in /usr/share/themes/Win11*Dark* /usr/share/themes/Win11*; do
             true
             [ -d "$d" ] && GTK_NAME=$(basename "$d") && break
           done
@@ -304,7 +305,8 @@ jobs:
 
       - name: Display and network
         shell: bash
-        run: |          set +e
+        run: |
+          set +e
           W=$(echo "$RES" | cut -d'x' -f1); H=$(echo "$RES" | cut -d'x' -f2)
           rm -rf /tmp/.X99-lock
           nohup Xvfb :99 -screen 0 ${W}x${H}x24 -ac +extension GLX +render -noreset > /tmp/xvfb.log 2>&1 &
@@ -457,7 +459,8 @@ jobs:
         shell: pwsh
         run: |
           $msi = "$env:TEMP\tailscale.msi"
-          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile $msi          Start-Process msiexec.exe -ArgumentList "/i", $msi, "/quiet", "/norestart" -Wait
+          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile $msi
+          Start-Process msiexec.exe -ArgumentList "/i", $msi, "/quiet", "/norestart" -Wait
           Remove-Item $msi -Force -ErrorAction SilentlyContinue
           $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
           $k = "${{ secrets.TAILSCALE_AUTH_KEY }}".Trim()

@@ -303,7 +303,7 @@ jobs:
           fi
           echo "[OK] software done"
 
-            - name: Display and network
+      - name: Display and network
         shell: bash
         run: |
           set +e

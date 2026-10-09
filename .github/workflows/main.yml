@@ -8,57 +8,43 @@ on:
         required: true
         default: 'linux'
         type: choice
-        options:
-          - 'linux'
-          - 'windows11'
-          - 'android'
+        options: ['linux', 'windows11', 'android']
       hours:
         description: 'Kitne ghante chalega (1-5)'
         required: true
         default: '5'
         type: choice
-        options:
-          - '1'
-          - '2'
-          - '3'
-          - '4'
-          - '5'
+        options: ['1', '2', '3', '4', '5']
       screen:
         description: 'Linux screen size'
         required: true
         default: '1366x768'
         type: choice
-        options:
-          - '1280x720'
-          - '1366x768'
-          - '1600x900'
-          - '1920x1080'
+        options: ['1280x720', '1366x768', '1600x900', '1920x1080']
       atype:
         description: 'Android screen - tablet ya phone'
         required: true
         default: 'tablet-1280x800'
         type: choice
-        options:
-          - 'tablet-1280x800'
-          - 'tablet-1600x1000'
-          - 'phone-720x1280'
-          - 'phone-1080x1920'
+        options: ['tablet-1280x800', 'tablet-1600x1000', 'phone-720x1280', 'phone-1080x1920']
       web:
         description: 'Browser me desktop kholo'
         required: true
         default: 'yes'
         type: choice
-        options:
-          - 'yes'
-          - 'no'
+        options: ['yes', 'no']
       extras:
         description: 'Linux me extra apps (VLC, GIMP, Office, VS Code)'
         required: true
         default: 'yes'
         type: choice
-        options:
-          - 'yes'
-          - 'no'
+        options: ['yes', 'no']
+      gaming:
+        description: 'Windows me gaming setup (Steam + cloud gaming)'
+        required: true
+        default: 'yes'
+        type: choice
+        options: ['yes', 'no']
 
 jobs:
 
@@ -86,10 +72,9 @@ jobs:
         run: |
           set +e
           sudo apt-get update -y 2>&1 | tail -2
-          sudo apt-get install -y xvfb x11vnc novnc websockify xrdp dbus-x11 x11-utils 2>&1 | tail -3
-          sudo apt-get install -y xfce4 xfce4-goodies xfce4-terminal thunar thunar-archive-plugin 2>&1 | tail -3
-          sudo apt-get install -y arc-theme materia-gtk-theme papirus-icon-theme plank 2>&1 | tail -3
-          sudo apt-get install -y fonts-noto fonts-liberation imagemagick xclip curl wget unzip 2>&1 | tail -3
+          sudo apt-get install -y xvfb x11vnc novnc websockify xrdp dbus-x11 x11-utils 2>&1 | tail -2
+          sudo apt-get install -y xfce4 xfce4-goodies xfce4-terminal thunar thunar-archive-plugin 2>&1 | tail -2
+          sudo apt-get install -y arc-theme materia-gtk-theme papirus-icon-theme plank fonts-noto fonts-liberation imagemagick xclip curl wget unzip 2>&1 | tail -2
           sudo apt-get install -y -f 2>&1 | tail -2
           for b in Xvfb x11vnc websockify startxfce4 xfconf-query dbus-launch plank; do
             if command -v $b > /dev/null 2>&1; then echo "[OK] $b"; else echo "[WARN] $b nahi mila"; fi
@@ -177,7 +162,6 @@ jobs:
               gio set "$f" metadata::xfce-exe-checksum "$(sha256sum "$f" | cut -d' ' -f1)" 2>/dev/null
             fi
           done
-          ls ~/Desktop/ | sed 's/^/[desktop] /'
 
       - name: '5 Desktop look'
         shell: bash
@@ -252,7 +236,6 @@ jobs:
               fi
             done
           done
-          ls ~/.config/plank/dock1/launchers/ | sed 's/^/[dock] /'
 
       - name: '6 Display and network'
         shell: bash
@@ -305,6 +288,16 @@ jobs:
           timeout 180 curl -fsSL --max-time 150 https://tailscale.com/install.sh | sh 2>&1 | tail -2
           K="${{ secrets.TAILSCALE_AUTH_KEY }}"
           IP=""
+          sudo mkdir -p /var/lib/tailscale /var/run/tailscale
+          if ! pgrep -x tailscaled > /dev/null; then
+            if [ -c /dev/net/tun ]; then
+              sudo nohup tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock > /tmp/tailscaled.log 2>&1 &
+            else
+              sudo nohup tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock > /tmp/tailscaled.log 2>&1 &
+            fi
+            sleep 6
+          fi
+          pgrep -x tailscaled > /dev/null && echo "[OK] tailscaled running" || echo "[WARN] tailscaled nahi chala"
           if echo "$K" | grep -q '^tskey-auth-'; then
             timeout 120 sudo tailscale up --authkey="$K" --hostname="cloudpc-$GITHUB_RUN_ID" --accept-routes 2>&1 | tail -3
             for i in $(seq 1 12); do
@@ -312,9 +305,11 @@ jobs:
               if [ -n "$IP" ]; then break; fi
               sleep 8
             done
-            if [ -n "$IP" ]; then echo "TS_IP=$IP" >> $GITHUB_ENV; echo "[OK] Tailscale IP = $IP"; else echo "[WARN] Tailscale IP nahi mila"; fi
+            if [ -n "$IP" ]; then echo "TS_IP=$IP" >> $GITHUB_ENV; echo "[OK] Tailscale IP = $IP"; else echo "[WARN] Tailscale IP nahi mila"; tail -5 /tmp/tailscaled.log 2>/dev/null; fi
           else
-            echo "[WARN] TAILSCALE_AUTH_KEY galat ya nahi hai - browser link use karo"
+            timeout 100 sudo tailscale up --hostname="cloudpc-$GITHUB_RUN_ID" > /tmp/ts.log 2>&1
+            L=$(grep -o 'https://login.tailscale.com/[^ ]*' /tmp/ts.log | head -1)
+            if [ -n "$L" ]; then echo "TS_LOGIN=$L" >> $GITHUB_ENV; echo "TAILSCALE LOGIN: $L"; else echo "[WARN] login link nahi mila"; fi
           fi
           if [ "$WEB" = "yes" ]; then
             timeout 150 curl -sL --max-time 120 -o /tmp/cf https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
@@ -354,13 +349,10 @@ jobs:
           PWX=${RDPPW:-not-set}
           LX=${CF_LINK:-not-set}
           $CM -size ${W}x${H} gradient:'#0f2027-#203a43-#2c5364' \
-            -gravity North -fill '#00d4ff' -pointsize 48 -annotate +0+70 'CLOUD PC' \
-            -fill '#ffffff' -pointsize 26 -annotate +0+140 'Linux Desktop | XFCE' \
-            -fill '#9fe6ff' -pointsize 22 -annotate +0+230 "RDP  $IPX:3389" \
-            -fill '#ffffff' -pointsize 22 -annotate +0+270 'USER  runner' \
-            -fill '#ffffff' -pointsize 22 -annotate +0+310 "PASS  $PWX" \
-            -fill '#7CFFB2' -pointsize 20 -annotate +0+390 "WEB  $LX" \
-            -fill '#888888' -pointsize 18 -annotate +0+460 'Firefox + Chrome ready' \
+            -gravity North -fill '#00d4ff' -pointsize 48 -annotate +0+80 'CLOUD PC' \
+            -fill '#9fe6ff' -pointsize 24 -annotate +0+170 "RDP  $IPX:3389" \
+            -fill '#ffffff' -pointsize 24 -annotate +0+220 "USER runner  PASS $PWX" \
+            -fill '#7CFFB2' -pointsize 20 -annotate +0+300 "WEB  $LX" \
             /tmp/cloudpc-info.png 2>/dev/null
           if [ -f /tmp/cloudpc-info.png ]; then
             sudo mkdir -p /usr/share/backgrounds
@@ -382,6 +374,7 @@ jobs:
             echo "  PASS : $RDPPW"
           else
             echo "  RDP  : Tailscale key nahi hai, browser use karo"
+            if [ -n "$TS_LOGIN" ]; then echo "  LOGIN : $TS_LOGIN"; fi
           fi
           if [ -n "$CF_LINK" ]; then
             echo "  WEB  : $CF_LINK/vnc.html?autoconnect=true&resize=scale"
@@ -453,7 +446,7 @@ jobs:
           echo "BINDER_OK=$BINDER_OK" >> $GITHUB_ENV
           sudo apt-get install -y adb scrcpy 2>&1 | tail -3
           command -v adb > /dev/null 2>&1 || sudo apt-get install -y android-tools-adb 2>&1 | tail -2
-                    sudo apt-get install -y xvfb x11vnc novnc websockify xrdp xfwm4 curl xdotool 2>&1 | tail -3
+          sudo apt-get install -y xvfb x11vnc novnc websockify xrdp xfwm4 curl xdotool 2>&1 | tail -3
           sudo apt-get install -y -f 2>&1 | tail -2
           for b in adb scrcpy Xvfb x11vnc websockify docker; do
             if command -v $b > /dev/null 2>&1; then echo "[OK] $b"; else echo "[WARN] $b nahi mila"; fi
@@ -509,11 +502,11 @@ jobs:
           if [ "$BOOT" = "1" ]; then echo "[OK] Android boot ho gaya"; else echo "[WARN] boot complete nahi hua, phir bhi aage badh rahe hain"; fi
           timeout 20 adb -s localhost:5555 shell getprop ro.build.version.release 2>/dev/null
           timeout 20 adb devices 2>&1 | tail -5
-
-      - name: '4 Android apps'
-        shell: bash
-        run: |
-          set +e 
+          - name: '4 Android apps'
+                
+          shell: bash
+          run: |
+          set +e
           if [ "$CONNECTED" != "1" ]; then echo "[skip] adb nahi hai"; exit 0; fi
           ADB="adb -s localhost:5555"
           timeout 30 $ADB shell settings put global device_provisioned 1 2>/dev/null
@@ -594,7 +587,7 @@ jobs:
             pgrep -x Xvfb > /dev/null && echo "[OK] Xvfb" || echo "[FAIL] Xvfb"
             pgrep -x scrcpy > /dev/null && echo "[OK] scrcpy" || echo "[FAIL] scrcpy"
             pgrep -x x11vnc > /dev/null && echo "[OK] x11vnc" || echo "[FAIL] x11vnc"
-                        PW=$(head -c 12 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 12)
+            PW=$(head -c 12 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 12)
             printf '%s\n' "runner:$PW" > /tmp/pwfile
             sudo chpasswd < /tmp/pwfile
             echo "RDPPW=$PW" >> $GITHUB_ENV
@@ -616,6 +609,16 @@ jobs:
           timeout 180 curl -fsSL --max-time 150 https://tailscale.com/install.sh | sh 2>&1 | tail -2
           K="${{ secrets.TAILSCALE_AUTH_KEY }}"
           IP=""
+          sudo mkdir -p /var/lib/tailscale /var/run/tailscale
+          if ! pgrep -x tailscaled > /dev/null; then
+            if [ -c /dev/net/tun ]; then
+              sudo nohup tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock > /tmp/tailscaled.log 2>&1 &
+            else
+              sudo nohup tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock > /tmp/tailscaled.log 2>&1 &
+            fi
+            sleep 6
+          fi
+          pgrep -x tailscaled > /dev/null && echo "[OK] tailscaled running" || echo "[WARN] tailscaled nahi chala"
           if echo "$K" | grep -q '^tskey-auth-'; then
             timeout 120 sudo tailscale up --authkey="$K" --hostname="android-$GITHUB_RUN_ID" --accept-routes 2>&1 | tail -3
             for i in $(seq 1 12); do
@@ -623,9 +626,11 @@ jobs:
               if [ -n "$IP" ]; then break; fi
               sleep 8
             done
-            if [ -n "$IP" ]; then echo "TS_IP=$IP" >> $GITHUB_ENV; echo "[OK] Tailscale IP = $IP"; else echo "[WARN] Tailscale IP nahi mila"; fi
+            if [ -n "$IP" ]; then echo "TS_IP=$IP" >> $GITHUB_ENV; echo "[OK] Tailscale IP = $IP"; else echo "[WARN] Tailscale IP nahi mila"; tail -5 /tmp/tailscaled.log 2>/dev/null; fi
           else
-            echo "[WARN] TAILSCALE_AUTH_KEY nahi hai - browser link use karo"
+            timeout 100 sudo tailscale up --hostname="android-$GITHUB_RUN_ID" > /tmp/ts.log 2>&1
+            L=$(grep -o 'https://login.tailscale.com/[^ ]*' /tmp/ts.log | head -1)
+            if [ -n "$L" ]; then echo "TS_LOGIN=$L" >> $GITHUB_ENV; echo "TAILSCALE LOGIN: $L"; else echo "[WARN] login link nahi mila"; fi
           fi
           if [ "$WEB" = "yes" ]; then
             timeout 150 curl -sL --max-time 120 -o /tmp/cf https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
@@ -657,31 +662,34 @@ jobs:
           timeout 30 sudo docker ps --filter name=redroid --format '{{.Status}}' 2>/dev/null | grep -q 'Up'; chk $? "redroid container"
           timeout 20 adb -s localhost:5555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' | grep -q '^1$'; chk $? "Android booted"
           timeout 20 adb -s localhost:5555 shell pm list packages 2>/dev/null | grep -q 'org.fdroid.fdroid'; chk $? "F-Droid app"
+          timeout 10 bash -c 'echo > /dev/tcp/127.0.0.1/5555' 2>/dev/null; chk $? "ADB port 5555 open"
           echo "=============================================="
           echo "  ANDROID TAIYAR HAI"
           echo "=============================================="
           echo "  Screen : ${AW}x${AH} dpi ${ADPI}"
-                    if [ -n "$TS_IP" ] && [ -n "$RDPPW" ]; then
+          if [ -n "$TS_IP" ] && [ -n "$RDPPW" ]; then
             echo "  ==== BEST CONTROL (RD app) ===="
             echo "  ADDRESS : $TS_IP:3389"
             echo "  USER    : runner"
             echo "  PASS    : $RDPPW"
             echo "  ==============================="
           fi
+          echo "=============================================="
           if [ -n "$TS_IP" ]; then
-            echo "  ADB    : $TS_IP:5555   (scrcpy app se connect karo)"
+            echo "  ====== FULL CONTROL (scrcpy) ======"
+            echo "  PC/LAPTOP : scrcpy --tcpip=$TS_IP:5555"
+            echo "  PHONE app : address $TS_IP  port 5555"
+            echo "  ADB test  : adb connect $TS_IP:5555"
+            echo "  ==================================="
           else
-            echo "  ADB    : Tailscale key nahi hai"
+            echo "  Tailscale key nahi hai - sirf WEB link chalega"
+            echo "  Full control ke liye TAILSCALE_AUTH_KEY daalo"
+            if [ -n "$TS_LOGIN" ]; then echo "  LOGIN : $TS_LOGIN"; fi
           fi
           if [ -n "$CF_LINK" ]; then
-            echo "  WEB    : $CF_LINK/vnc.html?autoconnect=true&resize=scale"
+            echo "  WEB backup: $CF_LINK/vnc.html?autoconnect=true&resize=scale"
           fi
-          echo "  TIME   : ${{ inputs.hours }} ghante"
-          echo "=============================================="
-          echo "  Phone se kaise chalayein:"
-          echo "  1) Upar wala WEB link browser me kholo"
-          echo "  2) ya phone me scrcpy app install karke"
-          echo "     ADB address : $TS_IP:5555"
+          echo "  TIME : ${{ inputs.hours }} ghante"
           echo "=============================================="
 
       - name: '7 Keep alive'
@@ -756,16 +764,102 @@ jobs:
             Write-Output "[WARN] TAILSCALE_AUTH_KEY galat ya nahi hai"
           }
 
-      - name: '4 Health check'
+      - name: '3b Gaming setup'
+        if: inputs.gaming == 'yes'
         shell: pwsh
         run: |
-          Write-Output "=============================================="
+          Write-Output "--- Chrome ---"
+          winget install --exact --id Google.Chrome --accept-package-agreements --accept-source-agreements
+          Write-Output "--- Steam ---"
+          winget install --exact --id Valve.Steam --accept-package-agreements --accept-source-agreements
+          Write-Output "--- Cloud gaming shortcuts ---"
+          $d = "$env:PUBLIC\Desktop"
+          $links = @{
+            'GeForce NOW'    = 'https://play.geforcenow.com'
+            'Xbox Game Pass' = 'https://www.xbox.com/play'
+            'Boosteroid'     = 'https://boosteroid.com'
+          }
+          $w = New-Object -ComObject WScript.Shell
+          foreach ($k in $links.Keys) {
+            $s = $w.CreateShortcut("$d\$k.url")
+            $s.TargetPath = $links[$k]
+            $s.Save()
+            Write-Output "[OK] shortcut $k"
+          }
+          Write-Output "[OK] gaming setup done"
+
+      - name: '4 Web access'
+        if: inputs.web == 'yes'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Write-Output "--- TightVNC ---"
+          try {
+            winget install --exact --id GlavSoft.TightVNC --silent --accept-package-agreements --accept-source-agreements 2>&1 | Select-Object -Last 3
+          } catch {
+            Write-Output "[WARN] TightVNC install fail"
+          }
+          Start-Sleep -Seconds 5
+          $vnc = 'C:\Program Files\TightVNC\tvnserver.exe'
+          if (Test-Path $vnc) {
+            try {
+              Start-Process -FilePath $vnc -ArgumentList '-run' -WindowStyle Hidden
+              Write-Output "[OK] TightVNC started :5900"
+            } catch {
+              Write-Output "[WARN] TightVNC start fail"
+            }
+          } else {
+            Write-Output "[WARN] TightVNC nahi mila"
+          }
+          Write-Output "--- websockify + noVNC ---"
+          try {
+            python -m pip install --quiet websockify 2>&1 | Out-Null
+            Invoke-WebRequest -Uri 'https://github.com/novnc/noVNC/archive/refs/heads/master.zip' -OutFile "$env:TEMP\novnc.zip" -UseBasicParsing
+            Expand-Archive -Path "$env:TEMP\novnc.zip" -DestinationPath "$env:TEMP" -Force
+            $nv = Get-ChildItem "$env:TEMP\noVNC-*" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($nv) {
+              Start-Process -FilePath 'python' -ArgumentList '-m','websockify','--web',$nv.FullName,'6080','localhost:5900' -WindowStyle Hidden
+              Write-Output "[OK] websockify :6080"
+            }
+          } catch {
+            Write-Output "[WARN] websockify setup fail"
+          }
+          Write-Output "--- cloudflared tunnel ---"
+          try {
+            Invoke-WebRequest -Uri 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe' -OutFile "$env:TEMP\cf.exe" -UseBasicParsing
+            Start-Process -FilePath "$env:TEMP\cf.exe" -ArgumentList 'tunnel','--url','http://127.0.0.1:6080','--no-autoupdate' -RedirectStandardOutput "$env:TEMP\cf_out.txt" -RedirectStandardError "$env:TEMP\cf_err.txt" -WindowStyle Hidden
+            $link = ''
+            for ($i = 0; $i -lt 15; $i++) {
+              Start-Sleep -Seconds 4
+              $txt = Get-Content "$env:TEMP\cf_out.txt","$env:TEMP\cf_err.txt" -ErrorAction SilentlyContinue
+              $m = $txt | Select-String -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com' | Select-Object -First 1
+              if ($m) {
+                $link = $m.Matches[0].Value
+                break
+              }
+            }
+            if ($link) {
+              Add-Content -Path $env:GITHUB_ENV -Value "CF_LINK=$link"
+              Write-Output "[OK] WEB : $link/vnc.html?autoconnect=true&resize=scale"
+            } else {
+              Write-Output "[WARN] tunnel link nahi mila"
+            }
+          } catch {
+            Write-Output "[WARN] cloudflared fail"
+          }
+
+      - name: '5 Health check'
+        shell: pwsh
+        run: |
+         Write-Output "=============================================="
           Write-Output "  WINDOWS 11 PC TAIYAR HAI"
           Write-Output "=============================================="
           if ($env:TS_IP) {
             Write-Output "  RDP  : $env:TS_IP:3389"
+            if ($env:CF_LINK) { Write-Output "  WEB  : $env:CF_LINK/vnc.html?autoconnect=true&resize=scale" }
           } else {
             Write-Output "  RDP  : Tailscale key nahi hai"
+            if ($env:CF_LINK) { Write-Output "  WEB  : $env:CF_LINK/vnc.html?autoconnect=true&resize=scale" }
           }
           Write-Output "  USER : RDP"
           Write-Output "  PASS : $env:RDPPW"
@@ -776,7 +870,7 @@ jobs:
           $u = Get-LocalUser -Name RDP -ErrorAction SilentlyContinue
           if ($u) { Write-Output "[OK] user RDP maujood hai" }
 
-      - name: '5 Keep alive'
+      - name: '6 Keep alive'
         shell: pwsh
         run: |
           $h = [int]'${{ inputs.hours }}'

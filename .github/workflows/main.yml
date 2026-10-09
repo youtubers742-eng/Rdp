@@ -453,7 +453,7 @@ jobs:
           echo "BINDER_OK=$BINDER_OK" >> $GITHUB_ENV
           sudo apt-get install -y adb scrcpy 2>&1 | tail -3
           command -v adb > /dev/null 2>&1 || sudo apt-get install -y android-tools-adb 2>&1 | tail -2
-          sudo apt-get install -y xvfb x11vnc novnc websockify curl xdotool 2>&1 | tail -3
+                    sudo apt-get install -y xvfb x11vnc novnc websockify xrdp xfwm4 curl xdotool 2>&1 | tail -3
           sudo apt-get install -y -f 2>&1 | tail -2
           for b in adb scrcpy Xvfb x11vnc websockify docker; do
             if command -v $b > /dev/null 2>&1; then echo "[OK] $b"; else echo "[WARN] $b nahi mila"; fi
@@ -594,6 +594,20 @@ jobs:
             pgrep -x Xvfb > /dev/null && echo "[OK] Xvfb" || echo "[FAIL] Xvfb"
             pgrep -x scrcpy > /dev/null && echo "[OK] scrcpy" || echo "[FAIL] scrcpy"
             pgrep -x x11vnc > /dev/null && echo "[OK] x11vnc" || echo "[FAIL] x11vnc"
+                        PW=$(head -c 12 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 12)
+            printf '%s\n' "runner:$PW" > /tmp/pwfile
+            sudo chpasswd < /tmp/pwfile
+            echo "RDPPW=$PW" >> $GITHUB_ENV
+            printf '%s\n' \
+            '#!/bin/bash' \
+            'xfwm4 &' \
+            'sleep 1' \
+            'S="scrcpy -s localhost:5555 --no-audio --stay-awake --disable-screensaver"' \
+            '$S --window-maximized || $S -m 1600 || $S' > ~/.xsession
+            chmod +x ~/.xsession
+            sudo sed -i 's/^allowed_users=.*/allowed_users=anybody/' /etc/xrdp/sesman.ini 2>/dev/null
+            sudo service xrdp restart 2>/dev/null || sudo /usr/sbin/xrdp 2>/dev/null || true
+            echo "[OK] RDP ready - Microsoft Remote Desktop se connect karo"
           else
             echo "[WARN] Android screen nahi chala - Tailscale aur link phir bhi chalenge"
           fi
@@ -647,6 +661,13 @@ jobs:
           echo "  ANDROID TAIYAR HAI"
           echo "=============================================="
           echo "  Screen : ${AW}x${AH} dpi ${ADPI}"
+                    if [ -n "$TS_IP" ] && [ -n "$RDPPW" ]; then
+            echo "  ==== BEST CONTROL (RD app) ===="
+            echo "  ADDRESS : $TS_IP:3389"
+            echo "  USER    : runner"
+            echo "  PASS    : $RDPPW"
+            echo "  ==============================="
+          fi
           if [ -n "$TS_IP" ]; then
             echo "  ADB    : $TS_IP:5555   (scrcpy app se connect karo)"
           else

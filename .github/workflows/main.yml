@@ -10,7 +10,7 @@ on:
         type: choice
         options: ['linux', 'windows11', 'android']
       hours:
-        description: 'Kitne ghante chalega (1-5)'
+        description: 'Kitne ghante (1-5)'
         required: true
         default: '5'
         type: choice
@@ -28,19 +28,19 @@ on:
         type: choice
         options: ['tablet-1280x800', 'tablet-1600x1000', 'phone-720x1280', 'phone-1080x1920']
       web:
-        description: 'Browser me desktop kholo'
+        description: 'Browser me bhi kholo (backup)'
         required: true
         default: 'yes'
         type: choice
         options: ['yes', 'no']
       extras:
-        description: 'Linux me extra apps (VLC, GIMP, Office, VS Code)'
+        description: 'Linux extra apps (VLC, GIMP, Office, VS Code)'
         required: true
         default: 'yes'
         type: choice
         options: ['yes', 'no']
       gaming:
-        description: 'Windows me gaming setup (Steam + cloud gaming)'
+        description: 'Windows gaming setup (Steam + cloud gaming)'
         required: true
         default: 'yes'
         type: choice
@@ -48,6 +48,7 @@ on:
 
 jobs:
 
+  # ================= LINUX =================
   linux:
     if: inputs.os == 'linux'
     runs-on: ubuntu-latest
@@ -58,25 +59,28 @@ jobs:
         run: |
           set +e
           echo "=============================================="
-          echo "  CLOUD PC  ->  LINUX DESKTOP"
+          echo "  CLOUD PC -> LINUX DESKTOP"
           echo "  Screen : ${{ inputs.screen }}"
           echo "  Time   : ${{ inputs.hours }} ghante"
-          echo "  Web    : ${{ inputs.web }}"
-          echo "  Extras : ${{ inputs.extras }}"
           echo "=============================================="
           echo "RES=${{ inputs.screen }}" >> $GITHUB_ENV
           echo "WEB=${{ inputs.web }}" >> $GITHUB_ENV
 
-      - name: '2 Install packages'
+      - name: '2 Install desktop aur apps'
         shell: bash
         run: |
           set +e
           sudo apt-get update -y 2>&1 | tail -2
-          sudo apt-get install -y xvfb x11vnc novnc websockify xrdp dbus-x11 x11-utils 2>&1 | tail -2
-          sudo apt-get install -y xfce4 xfce4-goodies xfce4-terminal thunar thunar-archive-plugin 2>&1 | tail -2
-          sudo apt-get install -y arc-theme materia-gtk-theme papirus-icon-theme plank fonts-noto fonts-liberation imagemagick xclip curl wget unzip 2>&1 | tail -2
+          sudo apt-get install -y xvfb x11vnc novnc websockify xrdp dbus-x11 2>&1 | tail -2
+          sudo apt-get install -y xfce4 xfce4-goodies xfce4-terminal thunar 2>&1 | tail -2
+          sudo apt-get install -y arc-theme materia-gtk-theme papirus-icon-theme plank 2>&1 | tail -2
+          sudo apt-get install -y fonts-noto fonts-liberation curl wget unzip xclip 2>&1 | tail -2
+          if [ "${{ inputs.extras }}" = "yes" ]; then
+            sudo apt-get install -y vlc gimp libreoffice-writer libreoffice-calc 2>&1 | tail -2
+            sudo apt-get install -y qbittorrent filezilla htop neofetch p7zip-full 2>&1 | tail -2
+          fi
           sudo apt-get install -y -f 2>&1 | tail -2
-          for b in Xvfb x11vnc websockify startxfce4 xfconf-query dbus-launch plank; do
+          for b in Xvfb x11vnc websockify startxfce4 xfconf-query plank; do
             if command -v $b > /dev/null 2>&1; then echo "[OK] $b"; else echo "[WARN] $b nahi mila"; fi
           done
 
@@ -93,8 +97,8 @@ jobs:
             sudo cp /tmp/moz.list /etc/apt/sources.list.d/mozilla.list
             printf '%s\n' 'Package: *' 'Pin: origin packages.mozilla.org' 'Pin-Priority: 1000' > /tmp/moz.pin
             sudo cp /tmp/moz.pin /etc/apt/preferences.d/mozilla
-            sudo apt-get update -y 2>&1 | tail -2
-            sudo apt-get install -y firefox 2>&1 | tail -3
+            sudo apt-get update -y 2>&1 | tail -1
+            sudo apt-get install -y firefox 2>&1 | tail -2
           fi
           if ! command -v firefox > /dev/null 2>&1; then
             echo "[WARN] repo fail - direct download"
@@ -103,23 +107,18 @@ jobs:
               sudo rm -rf /opt/firefox
               sudo tar -xJf /tmp/ff.tar.xz -C /opt/
               sudo ln -sf /opt/firefox/firefox /usr/local/bin/firefox
-              printf '%s\n' \
-              '[Desktop Entry]' \
-              'Name=Firefox' \
-              'Comment=Browse the World Wide Web' \
-              'Exec=/opt/firefox/firefox --no-sandbox --disable-dev-shm-usage %u' \
-              'Icon=/opt/firefox/browser/chrome/icons/default/default128.png' \
-              'Terminal=false' \
-              'Type=Application' \
-              'Categories=Network;WebBrowser;' > /tmp/ff.desktop
-              sudo cp /tmp/ff.desktop /usr/share/applications/firefox.desktop
+              printf '%s\n' '[Desktop Entry]' 'Name=Firefox' 'Comment=Web Browser' \
+                'Exec=/opt/firefox/firefox --no-sandbox --disable-dev-shm-usage %u' \
+                'Icon=/opt/firefox/browser/chrome/icons/default/default128.png' \
+                'Terminal=false' 'Type=Application' 'Categories=Network;WebBrowser;' \
+                > /usr/share/applications/firefox.desktop
             fi
           fi
           echo "--- Chrome ---"
           wget -q --timeout=150 --tries=2 -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
           if [ -s /tmp/chrome.deb ]; then
-            sudo apt-get install -y /tmp/chrome.deb 2>&1 | tail -3
-            sudo apt-get install -y -f 2>&1 | tail -2
+            sudo apt-get install -y /tmp/chrome.deb 2>&1 | tail -2
+            sudo apt-get install -y -f 2>&1 | tail -1
           fi
           patchde() {
             F="$1"
@@ -130,40 +129,10 @@ jobs:
           }
           patchde /usr/share/applications/firefox.desktop
           patchde /usr/share/applications/google-chrome.desktop
-          command -v firefox > /dev/null 2>&1 && echo "[OK] firefox installed" || echo "[FAIL] firefox nahi mila"
-          command -v google-chrome > /dev/null 2>&1 && echo "[OK] chrome installed" || echo "[WARN] chrome nahi mila"
+          command -v firefox > /dev/null 2>&1 && echo "[OK] Firefox ready" || echo "[FAIL] Firefox nahi mila"
+          command -v google-chrome > /dev/null 2>&1 && echo "[OK] Chrome ready" || echo "[WARN] Chrome nahi mila"
 
-      - name: '4 Extra apps'
-        shell: bash
-        run: |
-          set +e
-          if [ "${{ inputs.extras }}" = "yes" ]; then
-            sudo apt-get install -y vlc gimp libreoffice-writer libreoffice-calc 2>&1 | tail -3
-            sudo apt-get install -y telegram-desktop qbittorrent filezilla 2>&1 | tail -3
-            sudo apt-get install -y htop neofetch p7zip-full unrar-free 2>&1 | tail -3
-            sudo install -d -m 0755 /etc/apt/keyrings
-            wget -q --timeout=60 --tries=2 https://packages.microsoft.com/keys/microsoft.asc -O /tmp/ms.asc
-            if [ -s /tmp/ms.asc ]; then
-              sudo cp /tmp/ms.asc /etc/apt/keyrings/microsoft.gpg
-              echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/code stable main' > /tmp/vscode.list
-              sudo cp /tmp/vscode.list /etc/apt/sources.list.d/vscode.list
-              sudo apt-get update -y 2>&1 | tail -2
-              sudo apt-get install -y code 2>&1 | tail -3
-            fi
-          fi
-          mkdir -p ~/Desktop
-          for a in firefox google-chrome gimp vlc libreoffice-writer libreoffice-calc code telegramdesktop org.telegram.desktop; do
-            if [ -f "/usr/share/applications/$a.desktop" ]; then
-              cp "/usr/share/applications/$a.desktop" ~/Desktop/ 2>/dev/null
-            fi
-          done
-          for f in ~/Desktop/*.desktop; do
-            if [ -f "$f" ]; then
-              gio set "$f" metadata::xfce-exe-checksum "$(sha256sum "$f" | cut -d' ' -f1)" 2>/dev/null
-            fi
-          done
-
-      - name: '5 Desktop look'
+      - name: '4 Desktop look'
         shell: bash
         run: |
           set +e
@@ -173,71 +142,36 @@ jobs:
           done
           IC=Papirus-Dark
           if [ ! -d "/usr/share/icons/$IC" ]; then IC=Adwaita; fi
-          echo "[OK] theme = $TH"
-          echo "[OK] icons = $IC"
+          echo "[OK] theme = $TH | icons = $IC"
           echo "THEME=$TH" >> $GITHUB_ENV
           echo "ICON=$IC" >> $GITHUB_ENV
           mkdir -p ~/.config/xfce4/xfconf/xfce-perchannel-xml
-          printf '%s\n' \
-          '<?xml version="1.0" encoding="UTF-8"?>' \
-          '<channel name="xsettings" version="1.0">' \
-          '  <property name="Net" type="empty">' \
-          '    <property name="ThemeName" type="string" value="THEMEVAL"/>' \
-          '    <property name="IconThemeName" type="string" value="ICONVAL"/>' \
-          '    <property name="EnableEventSounds" type="bool" value="false"/>' \
-          '  </property>' \
-          '</channel>' | sed -e "s/THEMEVAL/$TH/" -e "s/ICONVAL/$IC/" > ~/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml
-          printf '%s\n' \
-          '<?xml version="1.0" encoding="UTF-8"?>' \
-          '<channel name="xfwm4" version="1.0">' \
-          '  <property name="general" type="empty">' \
-          '    <property name="theme" type="string" value="THEMEVAL"/>' \
-          '    <property name="use_compositing" type="bool" value="true"/>' \
-          '    <property name="button_layout" type="string" value="O|HMC"/>' \
-          '    <property name="title_alignment" type="string" value="center"/>' \
-          '  </property>' \
-          '</channel>' | sed -e "s/THEMEVAL/$TH/" > ~/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml
-          W=${RES%x*}; H=${RES#*x}
-          if command -v convert > /dev/null 2>&1; then CM=convert; else CM=magick; fi
-          $CM -size ${W}x${H} gradient:'#0f2027-#203a43-#2c5364' /tmp/wall-base.png 2>/dev/null
-          if [ -f /tmp/wall-base.png ]; then
-            sudo mkdir -p /usr/share/backgrounds
-            sudo cp /tmp/wall-base.png /usr/share/backgrounds/cloudpc-base.png
-            printf '%s\n' \
-            '<?xml version="1.0" encoding="UTF-8"?>' \
-            '<channel name="xfce4-desktop" version="1.0">' \
-            '  <property name="backdrop" type="empty">' \
-            '    <property name="screen0" type="empty">' \
-            '      <property name="monitor0" type="empty">' \
-            '        <property name="image-path" type="string" value="/usr/share/backgrounds/cloudpc-base.png"/>' \
-            '        <property name="last-image" type="string" value="/usr/share/backgrounds/cloudpc-base.png"/>' \
-            '        <property name="image-style" type="int" value="5"/>' \
-            '      </property>' \
-            '    </property>' \
-            '  </property>' \
-            '</channel>' > ~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml
-            echo "[OK] wallpaper set"
-          fi
+          X=~/.config/xfce4/xfconf/xfce-perchannel-xml
+          printf '%b' '<?xml version="1.0" encoding="UTF-8"?>\n<channel name="xsettings" version="1.0">\n  <property name="Net" type="empty">\n    <property name="ThemeName" type="string" value="@TH@"/>\n    <property name="IconThemeName" type="string" value="@IC@"/>\n    <property name="EnableEventSounds" type="bool" value="false"/>\n  </property>\n</channel>\n' | sed -e "s/@TH@/$TH/" -e "s/@IC@/$IC/" > $X/xsettings.xml
+          printf '%b' '<?xml version="1.0" encoding="UTF-8"?>\n<channel name="xfwm4" version="1.0">\n  <property name="general" type="empty">\n    <property name="theme" type="string" value="@TH@"/>\n    <property name="use_compositing" type="bool" value="true"/>\n    <property name="button_layout" type="string" value="O|HMC"/>\n    <property name="title_alignment" type="string" value="center"/>\n  </property>\n</channel>\n' | sed -e "s/@TH@/$TH/" > $X/xfwm4.xml
+          printf '%b' '<?xml version="1.0" encoding="UTF-8"?>\n<channel name="xfce4-desktop" version="1.0">\n  <property name="backdrop" type="empty">\n    <property name="screen0" type="empty">\n      <property name="monitor0" type="empty">\n        <property name="image-path" type="string" value="/usr/share/backgrounds/xfce/xfce-teal.jpg"/>\n        <property name="last-image" type="string" value="/usr/share/backgrounds/xfce/xfce-teal.jpg"/>\n        <property name="image-style" type="int" value="5"/>\n      </property>\n    </property>\n  </property>\n</channel>\n' > $X/xfce4-desktop.xml
+          ls /usr/share/backgrounds/xfce/*.jpg > /dev/null 2>&1 && echo "[OK] wallpaper set" || echo "[WARN] wallpaper nahi mila"
           mkdir -p ~/.config/autostart ~/.config/plank/dock1/launchers
-          printf '%s\n' \
-          '[Desktop Entry]' \
-          'Name=Plank' \
-          'Exec=plank' \
-          'Terminal=false' \
-          'Type=Application' \
-          'X-XFCE-Autostart-Override=true' > ~/.config/autostart/plank.desktop
-          for a in firefox google-chrome exo-terminal-emulator thunar gimp vlc libreoffice-writer libreoffice-calc code telegramdesktop org.telegram.desktop; do
-            for d in /usr/share/applications /var/lib/snapd/desktop/applications; do
-              if [ -f "$d/$a.desktop" ]; then
-                printf '%s\n' \
-                '[PlankItemsDockItemPreferences]' \
-                "Launcher=file://$d/$a.desktop" > ~/.config/plank/dock1/launchers/$a.dockitem
-                break
-              fi
-            done
+          printf '%s\n' '[Desktop Entry]' 'Name=Plank' 'Exec=plank' 'Terminal=false' \
+            'Type=Application' 'X-XFCE-Autostart-Override=true' > ~/.config/autostart/plank.desktop
+          for a in firefox google-chrome exo-terminal-emulator thunar gimp vlc libreoffice-writer libreoffice-calc org.gnome.qbittorrent filezilla; do
+            if [ -f "/usr/share/applications/$a.desktop" ]; then
+              printf '%s\n' '[PlankItemsDockItemPreferences]' \
+                "Launcher=file:///usr/share/applications/$a.desktop" > ~/.config/plank/dock1/launchers/$a.dockitem
+            fi
           done
+          mkdir -p ~/Desktop
+          for a in firefox google-chrome gimp vlc libreoffice-writer libreoffice-calc org.gnome.qbittorrent filezilla; do
+            if [ -f "/usr/share/applications/$a.desktop" ]; then cp "/usr/share/applications/$a.desktop" ~/Desktop/ 2>/dev/null; fi
+          done
+          for f in ~/Desktop/*.desktop; do
+            if [ -f "$f" ]; then
+              gio set "$f" metadata::xfce-exe-checksum "$(sha256sum "$f" | cut -d' ' -f1)" 2>/dev/null
+            fi
+          done
+          echo "[OK] desktop shortcuts ready"
 
-      - name: '6 Display and network'
+      - name: '5 Display aur network'
         shell: bash
         run: |
           set +e
@@ -246,11 +180,12 @@ jobs:
           printf '%s\n' "runner:$PW" > /tmp/pwfile
           sudo chpasswd < /tmp/pwfile
           echo "RDPPW=$PW" >> $GITHUB_ENV
-          echo "[OK] password set"
+          echo "[OK] user runner ka password set"
           printf '%s\n' 'startxfce4' > ~/.xsession
           sudo sed -i 's/^allowed_users=.*/allowed_users=anybody/' /etc/xrdp/sesman.ini 2>/dev/null
+          sudo sed -i 's/^#\?autorun=.*/autorun=/' /etc/xrdp/sesman.ini 2>/dev/null
           sudo service xrdp restart 2>/dev/null || sudo /usr/sbin/xrdp 2>/dev/null || true
-          sleep 2
+          sleep 3
           rm -rf /tmp/.X99-lock
           nohup Xvfb :99 -screen 0 ${W}x${H}x24 -ac +extension GLX +render -noreset > /tmp/xvfb.log 2>&1 &
           sleep 4
@@ -268,50 +203,85 @@ jobs:
           nohup websockify --web=/usr/share/novnc 6080 localhost:5900 > /tmp/novnc.log 2>&1 &
           sleep 3
           pgrep -x Xvfb > /dev/null && echo "[OK] Xvfb" || echo "[FAIL] Xvfb"
-          pgrep -x x11vnc > /dev/null && echo "[OK] x11vnc" || echo "[FAIL] x11vnc"
-          XFCE_UP=0
-          if pgrep -f startxfce4 > /dev/null || pgrep -x xfce4-session > /dev/null || pgrep -x xfdesktop > /dev/null || pgrep -x xfce4-panel > /dev/null; then XFCE_UP=1; fi
-          if [ "$XFCE_UP" = "1" ]; then
+          pgrep -x x11vnc > /dev/null && echo "[OK] VNC :5900" || echo "[FAIL] x11vnc"
+          pgrep -f websockify > /dev/null && echo "[OK] noVNC :6080" || echo "[FAIL] websockify"
+          XU=0
+          for n in startxfce4 xfce4-session xfdesktop xfce4-panel; do
+            pgrep -f $n > /dev/null 2>&1 && XU=1
+          done
+          if [ "$XU" = "1" ]; then
             echo "[OK] XFCE chal raha hai"
           else
             nohup startxfce4 > /tmp/xfce2.log 2>&1 &
             sleep 14
-            if pgrep -f startxfce4 > /dev/null || pgrep -x xfce4-session > /dev/null || pgrep -x xfdesktop > /dev/null || pgrep -x xfce4-panel > /dev/null; then
-              XFCE_UP=1
-              echo "[OK] XFCE doosri koshish me chal gaya"
-            else
-              echo "[FAIL] XFCE nahi chala"
-              tail -5 /tmp/xfce.log 2>/dev/null
-            fi
+            for n in startxfce4 xfce4-session xfdesktop xfce4-panel; do pgrep -f $n > /dev/null 2>&1 && XU=1; done
+            if [ "$XU" = "1" ]; then echo "[OK] XFCE doosri koshish me chal gaya"; else echo "[FAIL] XFCE nahi chala"; tail -5 /tmp/xfce.log 2>/dev/null; fi
           fi
-          echo "--- Tailscale ---"
-          timeout 180 curl -fsSL --max-time 150 https://tailscale.com/install.sh | sh 2>&1 | tail -2
-          K="${{ secrets.TAILSCALE_AUTH_KEY }}"
+
+          echo "---------------- Tailscale ----------------"
+          T=/tmp/ts; mkdir -p $T; rm -f $T/tailscale $T/tailscaled
+          timeout 240 curl -fsSL --max-time 200 https://pkgs.tailscale.com/stable/tailscale_latest_amd64.tgz -o /tmp/ts.tgz
+          tar -xzf /tmp/ts.tgz -C $T --strip-components=1 2>/dev/null
+          TS=$T/tailscale; TSD=$T/tailscaled
+          if [ ! -x "$TSD" ]; then
+            echo "[WARN] static download fail - install.sh try"
+            timeout 180 curl -fsSL --max-time 150 https://tailscale.com/install.sh | sh > /tmp/tsi.log 2>&1
+            TS=$(command -v tailscale); TSD=$(command -v tailscaled)
+          fi
+          if [ -z "$TSD" ]; then echo "[FAIL] tailscale binary nahi mila"; fi
+          echo "[OK] binary = $TSD"
+          K='${{ secrets.TAILSCALE_AUTH_KEY }}'
+          HN="cloudpc-$GITHUB_RUN_ID"
           IP=""
-          sudo mkdir -p /var/lib/tailscale /var/run/tailscale
-          if ! pgrep -x tailscaled > /dev/null; then
-            if [ -c /dev/net/tun ]; then
-              sudo nohup tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock > /tmp/tailscaled.log 2>&1 &
+          ts_up() {
+            pkill -x tailscaled 2>/dev/null
+            sudo pkill -x tailscaled 2>/dev/null
+            rm -f /tmp/ts.sock /tmp/ts.state
+            sleep 1
+            if [ "$1" = "kern" ] && [ -c /dev/net/tun ]; then
+              SU="sudo"; EX=""
             else
-              sudo nohup tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock > /tmp/tailscaled.log 2>&1 &
+              SU=""; EX="--tun=userspace-networking"
             fi
-            sleep 6
-          fi
-          pgrep -x tailscaled > /dev/null && echo "[OK] tailscaled running" || echo "[WARN] tailscaled nahi chala"
-          if echo "$K" | grep -q '^tskey-auth-'; then
-            timeout 120 sudo tailscale up --authkey="$K" --hostname="cloudpc-$GITHUB_RUN_ID" --accept-routes 2>&1 | tail -3
+            $SU nohup $TSD $EX --state=/tmp/ts.state --socket=/tmp/ts.sock > /tmp/tsd.log 2>&1 &
+            sleep 7
+            if ! pgrep -x tailscaled > /dev/null; then echo "[WARN] $1: daemon nahi chala"; return 1; fi
+            if ! timeout 25 $SU $TS --socket=/tmp/ts.sock status > /dev/null 2>&1; then echo "[WARN] $1: socket connect fail"; return 1; fi
+            echo "[OK] tailscaled chala (mode $1)"
+            if ! echo "$K" | grep -q '^tskey-auth-'; then return 0; fi
+            timeout 70 $SU $TS --socket=/tmp/ts.sock up --reset --timeout=60s --authkey="$K" --hostname="$HN" --accept-routes > /tmp/tsup.log 2>&1
             for i in $(seq 1 12); do
-              IP=$(timeout 20 sudo tailscale ip -4 2>/dev/null | grep '^100\.' | head -1)
+              IP=$(timeout 15 $SU $TS --socket=/tmp/ts.sock ip -4 2>/dev/null | grep '^100\.' | head -1)
               if [ -n "$IP" ]; then break; fi
-              sleep 8
+              sleep 5
             done
-            if [ -n "$IP" ]; then echo "TS_IP=$IP" >> $GITHUB_ENV; echo "[OK] Tailscale IP = $IP"; else echo "[WARN] Tailscale IP nahi mila"; tail -5 /tmp/tailscaled.log 2>/dev/null; fi
-          else
-            timeout 100 sudo tailscale up --hostname="cloudpc-$GITHUB_RUN_ID" > /tmp/ts.log 2>&1
-            L=$(grep -o 'https://login.tailscale.com/[^ ]*' /tmp/ts.log | head -1)
-            if [ -n "$L" ]; then echo "TS_LOGIN=$L" >> $GITHUB_ENV; echo "TAILSCALE LOGIN: $L"; else echo "[WARN] login link nahi mila"; fi
+            if [ -n "$IP" ]; then echo "[OK] Tailscale IP = $IP"; return 0; fi
+            echo "[WARN] $1: IP nahi mila"; tail -6 /tmp/tsd.log 2>/dev/null; return 1
+          }
+          if [ -n "$TSD" ]; then
+            ts_up kern || { echo "[..] kernel mode fail - userspace mode try"; ts_up user || echo "[FAIL] Tailscale nahi chala"; }
           fi
+          if [ -n "$IP" ]; then
+            echo "TS_IP=$IP" >> $GITHUB_ENV
+          elif [ -n "$TSD" ]; then
+            if echo "$K" | grep -q '^tskey-auth-'; then
+              echo "[WARN] Tailscale IP nahi mila - browser link use karo"
+              tail -12 /tmp/tsd.log 2>/dev/null
+              tail -5 /tmp/tsup.log 2>/dev/null
+            else
+              ( timeout 40 $SU $TS --socket=/tmp/ts.sock up --reset --hostname="$HN" --timeout=25s > /tmp/tsup.log 2>&1 & )
+              AU=""
+              for i in $(seq 1 8); do
+                sleep 4
+                AU=$(timeout 15 $SU $TS --socket=/tmp/ts.sock status --json 2>/dev/null | grep -o '"AuthURL" *: *"[^"]*"' | head -1 | sed 's/.*: *"//;s/"$//')
+                if [ -n "$AU" ]; then break; fi
+              done
+              if [ -n "$AU" ]; then echo "TS_LOGIN=$AU" >> $GITHUB_ENV; echo "[OK] LOGIN LINK: $AU"; else echo "[WARN] login link nahi mila - TAILSCALE_AUTH_KEY daalo"; fi
+            fi
+          fi
+
           if [ "$WEB" = "yes" ]; then
+            echo "---------------- Browser link ----------------"
             timeout 150 curl -sL --max-time 120 -o /tmp/cf https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
             chmod +x /tmp/cf
             nohup /tmp/cf tunnel --url http://127.0.0.1:6080 --no-autoupdate > /tmp/cf.log 2>&1 &
@@ -321,10 +291,10 @@ jobs:
               LINK=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' /tmp/cf.log | head -1)
               if [ -n "$LINK" ]; then break; fi
             done
-            if [ -n "$LINK" ]; then echo "CF_LINK=$LINK" >> $GITHUB_ENV; echo "[OK] browser link mil gaya"; else echo "[WARN] tunnel nahi bana"; fi
+            if [ -n "$LINK" ]; then echo "CF_LINK=$LINK" >> $GITHUB_ENV; echo "[OK] browser link mil gaya"; else echo "[WARN] tunnel nahi bana"; tail -5 /tmp/cf.log 2>/dev/null; fi
           fi
 
-      - name: '7 Health check'
+      - name: '6 Health check'
         shell: bash
         run: |
           set +e
@@ -332,57 +302,39 @@ jobs:
           echo "=============================================="
           echo "  HEALTH CHECK"
           echo "=============================================="
-          chk() {
-            if [ "$1" = "0" ]; then echo "[OK] $2"; else echo "[FAIL] $2"; fi
-          }
+          chk() { if [ "$1" = "0" ]; then echo "[OK] $2"; else echo "[FAIL] $2"; fi; }
           pgrep -x Xvfb > /dev/null; chk $? "Xvfb display"
-          pgrep -x x11vnc > /dev/null; chk $? "x11vnc :5900"
-          pgrep -f websockify > /dev/null; chk $? "websockify :6080"
+          pgrep -x x11vnc > /dev/null; chk $? "VNC :5900"
+          pgrep -f websockify > /dev/null; chk $? "noVNC :6080"
           pgrep -x xfce4-session > /dev/null || pgrep -x xfdesktop > /dev/null; chk $? "XFCE desktop"
           command -v firefox > /dev/null 2>&1; chk $? "Firefox"
           command -v google-chrome > /dev/null 2>&1; chk $? "Chrome"
-          [ -d "/usr/share/themes/${THEME:-Adwaita-dark}" ]; chk $? "Theme ${THEME:-Adwaita-dark}"
-          [ -d "/usr/share/icons/${ICON:-Adwaita}" ]; chk $? "Icons ${ICON:-Adwaita}"
-          W=${RES%x*}; H=${RES#*x}
-          if command -v convert > /dev/null 2>&1; then CM=convert; else CM=magick; fi
-          IPX=${TS_IP:-not-set}
-          PWX=${RDPPW:-not-set}
-          LX=${CF_LINK:-not-set}
-          $CM -size ${W}x${H} gradient:'#0f2027-#203a43-#2c5364' \
-            -gravity North -fill '#00d4ff' -pointsize 48 -annotate +0+80 'CLOUD PC' \
-            -fill '#9fe6ff' -pointsize 24 -annotate +0+170 "RDP  $IPX:3389" \
-            -fill '#ffffff' -pointsize 24 -annotate +0+220 "USER runner  PASS $PWX" \
-            -fill '#7CFFB2' -pointsize 20 -annotate +0+300 "WEB  $LX" \
-            /tmp/cloudpc-info.png 2>/dev/null
-          if [ -f /tmp/cloudpc-info.png ]; then
-            sudo mkdir -p /usr/share/backgrounds
-            sudo cp /tmp/cloudpc-info.png /usr/share/backgrounds/cloudpc-info.png
-            timeout 10 xfconf-query -c xfce4-desktop -p /backdrop/screen0/monitor0/image-path -s /usr/share/backgrounds/cloudpc-info.png 2>/dev/null
-            timeout 10 xfconf-query -c xfce4-desktop -p /backdrop/screen0/monitor0/last-image -s /usr/share/backgrounds/cloudpc-info.png 2>/dev/null
-            echo "[OK] desktop pe info likh diya"
-          fi
-          timeout 10 xfconf-query -c xsettings -p /Net/ThemeName -s "${THEME:-Adwaita-dark}" 2>/dev/null
-          timeout 10 xfconf-query -c xsettings -p /Net/IconThemeName -s "${ICON:-Adwaita}" 2>/dev/null
-          timeout 10 xfconf-query -c xfwm4 -p /general/theme -s "${THEME:-Adwaita-dark}" 2>/dev/null
-          timeout 10 xfce4-panel -r 2>/dev/null
+          timeout 10 bash -c 'echo > /dev/tcp/127.0.0.1/3389' 2>/dev/null; chk $? "xrdp :3389"
+          timeout 10 bash -c 'echo > /dev/tcp/127.0.0.1/5900' 2>/dev/null; chk $? "VNC port open"
           echo "=============================================="
           echo "  LINUX PC TAIYAR HAI"
           echo "=============================================="
           if [ -n "$TS_IP" ]; then
-            echo "  RDP  : $TS_IP:3389"
-            echo "  USER : runner"
-            echo "  PASS : $RDPPW"
+            echo "  == RDP (sabse best) =="
+            echo "  ADDRESS : $TS_IP:3389"
+            echo "  USER    : runner"
+            echo "  PASS    : $RDPPW"
+            echo "  -----------------------"
+            echo "  == VNC (koi bhi VNC app) =="
+            echo "  ADDRESS : $TS_IP:5900"
+            echo "  PASS    : koi nahi (blank)"
           else
-            echo "  RDP  : Tailscale key nahi hai, browser use karo"
-            if [ -n "$TS_LOGIN" ]; then echo "  LOGIN : $TS_LOGIN"; fi
+            echo "  Tailscale nahi chala - sirf browser link chalega"
+            if [ -n "$TS_LOGIN" ]; then echo "  LOGIN   : $TS_LOGIN"; fi
           fi
           if [ -n "$CF_LINK" ]; then
-            echo "  WEB  : $CF_LINK/vnc.html?autoconnect=true&resize=scale"
+            echo "  == BROWSER (backup) =="
+            echo "  $CF_LINK/vnc.html?autoconnect=true&resize=scale"
           fi
-          echo "  TIME : ${{ inputs.hours }} ghante"
+          echo "  TIME    : ${{ inputs.hours }} ghante"
           echo "=============================================="
 
-      - name: '8 Keep alive'
+      - name: '7 Keep alive'
         shell: bash
         run: |
           set +e
@@ -393,10 +345,12 @@ jobs:
             if [ $T -lt $S ]; then S=$T; fi
             sleep $S
             T=$((T-S))
-            echo "[alive] bache $((T/60)) min  |  $(date +%H:%M:%S)"
+            echo "[alive] bache $((T/60)) min | $(date +%H:%M:%S)"
+            pgrep -x Xvfb > /dev/null || echo "[warn] Xvfb dead"
           done
           echo "TIME OVER"
 
+  # ================= ANDROID =================
   android:
     if: inputs.os == 'android'
     runs-on: ubuntu-latest
@@ -413,69 +367,58 @@ jobs:
           AH=$(echo "$SZ" | cut -dx -f2)
           if [ "$KIND" = "tablet" ]; then ADPI=200; else ADPI=320; fi
           echo "=============================================="
-          echo "  CLOUD PC  ->  ANDROID"
-          echo "  Type  : $KIND"
-          echo "  Size  : ${AW}x${AH}  dpi $ADPI"
-          echo "  Time  : ${{ inputs.hours }} ghante"
-          echo "  Web   : ${{ inputs.web }}"
+          echo "  CLOUD PC -> ANDROID"
+          echo "  Type : $KIND  Size : ${AW}x${AH} dpi $ADPI"
+          echo "  Time : ${{ inputs.hours }} ghante"
           echo "=============================================="
           echo "AW=$AW" >> $GITHUB_ENV
           echo "AH=$AH" >> $GITHUB_ENV
           echo "ADPI=$ADPI" >> $GITHUB_ENV
           echo "WEB=${{ inputs.web }}" >> $GITHUB_ENV
 
-      - name: '2 Kernel modules and packages'
+      - name: '2 Kernel aur packages'
         shell: bash
         run: |
           set +e
-          sudo apt-get update -y 2>&1 | tail -2
-          sudo apt-get install -y linux-modules-extra-$(uname -r) 2>&1 | tail -2
-          sudo modprobe binder_linux devices="binder,hwbinder,vndbinder" 2>&1 | tail -2
-          sudo modprobe ashmem_linux 2>&1 | tail -2
-          BINDER_OK=0
-          if [ -e /dev/binder ] || [ -e /dev/binderfs/binder ]; then BINDER_OK=1; fi
-          if [ "$BINDER_OK" = "0" ]; then
+          sudo apt-get update -y 2>&1 | tail -1
+          sudo apt-get install -y linux-modules-extra-$(uname -r) 2>&1 | tail -1
+          sudo modprobe binder_linux devices="binder,hwbinder,vndbinder" 2>&1 | tail -1
+          sudo modprobe ashmem_linux 2>&1 | tail -1
+          BO=0
+          if [ -e /dev/binder ] || [ -e /dev/binderfs/binder ]; then BO=1; fi
+          if [ "$BO" = "0" ]; then
             sudo mkdir -p /dev/binderfs
             sudo mount -t binder binder /dev/binderfs 2>/dev/null
-            sudo ln -sf /dev/binderfs/binder /dev/binder 2>/dev/null
-            sudo ln -sf /dev/binderfs/hwbinder /dev/hwbinder 2>/dev/null
-            sudo ln -sf /dev/binderfs/vndbinder /dev/vndbinder 2>/dev/null
-            if [ -e /dev/binderfs/binder ]; then BINDER_OK=1; fi
+            for d in binder hwbinder vndbinder;  do sudo ln -sf /dev/binderfs/$d /dev/$d 2>/dev/null; done
+            if [ -e /dev/binderfs/binder ]; then BO=1; fi
           fi
-          if [ "$BINDER_OK" = "1" ]; then echo "[OK] binder ready"; else echo "[FAIL] binder nahi mila"; fi
-          echo "BINDER_OK=$BINDER_OK" >> $GITHUB_ENV
-          sudo apt-get install -y adb scrcpy 2>&1 | tail -3
-          command -v adb > /dev/null 2>&1 || sudo apt-get install -y android-tools-adb 2>&1 | tail -2
-          sudo apt-get install -y xvfb x11vnc novnc websockify xrdp xfwm4 curl xdotool 2>&1 | tail -3
-          sudo apt-get install -y -f 2>&1 | tail -2
+          if [ "$BO" = "1" ]; then echo "[OK] binder ready"; else echo "[FAIL] binder nahi mila"; fi
+          echo "BINDER_OK=$BO" >> $GITHUB_ENV
+          sudo apt-get install -y adb scrcpy android-tools-adb 2>&1 | tail -2
+          sudo apt-get install -y xvfb x11vnc novnc websockify xfwm4 curl 2>&1 | tail -2
+          sudo apt-get install -y -f 2>&1 | tail -1
           for b in adb scrcpy Xvfb x11vnc websockify docker; do
             if command -v $b > /dev/null 2>&1; then echo "[OK] $b"; else echo "[WARN] $b nahi mila"; fi
           done
 
-      - name: '3 Start Android'
+      - name: '3 Android start karo'
         shell: bash
         run: |
           set +e
           echo "CONNECTED=0" >> $GITHUB_ENV
-          if [ "$BINDER_OK" != "1" ]; then
-            echo "[FAIL] binder nahi hai - Android start nahi ho sakta"
-            exit 0
-          fi
+          if [ "$BINDER_OK" != "1" ]; then echo "[FAIL] binder nahi hai"; exit 0; fi
           IMG=""
           for t in 13.0.0-latest 12.0.0-latest 11.0.0-latest; do
-            echo "--- trying redroid/redroid:$t ---"
-            timeout 900 sudo docker pull redroid/redroid:$t > /tmp/pull.log 2>&1
-            if [ $? -eq 0 ]; then IMG=redroid/redroid:$t; break; fi
-            tail -3 /tmp/pull.log
+            echo "--- pull redroid/redroid:$t ---"
+            if timeout 900 sudo docker pull redroid/redroid:$t > /tmp/pull.log 2>&1; then IMG=redroid/redroid:$t; break; fi
+            tail -2 /tmp/pull.log
           done
           if [ -z "$IMG" ]; then echo "[FAIL] docker image nahi mila"; exit 0; fi
           echo "[OK] image = $IMG"
           mkdir -p ~/data
           timeout 60 sudo docker rm -f redroid 2>/dev/null
           timeout 180 sudo docker run -itd --privileged --name redroid \
-            -v ~/data:/data \
-            -p 5555:5555 \
-            $IMG \
+            -v ~/data:/data -p 5555:5555 $IMG \
             androidboot.redroid_width=$AW \
             androidboot.redroid_height=$AH \
             androidboot.redroid_dpi=$ADPI \
@@ -484,76 +427,65 @@ jobs:
           sleep 10
           timeout 30 sudo docker ps -a --filter name=redroid --format '{{.Status}}'
           timeout 20 adb kill-server 2>/dev/null
-          timeout 30 adb start-server 2>&1 | tail -2
-          CONNECTED=0
+          timeout 30 adb start-server 2>&1 | tail -1
+          CN=0
           for i in $(seq 1 30); do
             timeout 20 adb connect localhost:5555 > /tmp/adb.log 2>&1
-            if grep -q 'connected to' /tmp/adb.log; then CONNECTED=1; break; fi
+            if grep -q 'connected to' /tmp/adb.log; then CN=1; break; fi
             sleep 5
           done
-          if [ "$CONNECTED" = "1" ]; then echo "[OK] adb connected"; else echo "[FAIL] adb connect nahi hua"; tail -3 /tmp/adb.log; fi
-          echo "CONNECTED=$CONNECTED" >> $GITHUB_ENV
-          BOOT=0
+          if [ "$CN" = "1" ]; then echo "[OK] adb connected"; else echo "[FAIL] adb connect nahi hua"; tail -3 /tmp/adb.log; fi
+          echo "CONNECTED=$CN" >> $GITHUB_ENV
           for i in $(seq 1 60); do
             B=$(timeout 15 adb -s localhost:5555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
-            if [ "$B" = "1" ]; then BOOT=1; break; fi
+            if [ "$B" = "1" ]; then echo "[OK] Android boot ho gaya"; break; fi
             sleep 5
           done
-          if [ "$BOOT" = "1" ]; then echo "[OK] Android boot ho gaya"; else echo "[WARN] boot complete nahi hua, phir bhi aage badh rahe hain"; fi
           timeout 20 adb -s localhost:5555 shell getprop ro.build.version.release 2>/dev/null
-          timeout 20 adb devices 2>&1 | tail -5
-          - name: '4 Android apps'
-                
-          shell: bash
-          run: |
+
+      - name: '4 Android apps'
+        shell: bash
+        run: |
           set +e
           if [ "$CONNECTED" != "1" ]; then echo "[skip] adb nahi hai"; exit 0; fi
-          ADB="adb -s localhost:5555"
-          timeout 30 $ADB shell settings put global device_provisioned 1 2>/dev/null
-          timeout 30 $ADB shell settings put secure user_setup_complete 1 2>/dev/null
-          timeout 30 $ADB shell settings put global package_verifier_enable 0 2>/dev/null
-          timeout 30 $ADB shell settings put global window_animation_scale 0.5 2>/dev/null
-          timeout 30 $ADB shell settings put global transition_animation_scale 0.5 2>/dev/null
-          timeout 30 $ADB shell settings put global animator_duration_scale 0.5 2>/dev/null
-          timeout 30 $ADB shell settings put system screen_off_timeout 600000 2>/dev/null
-          timeout 30 $ADB shell settings put global stay_on_while_plugged_in 3 2>/dev/null
-          timeout 30 $ADB shell svc power stayon true 2>/dev/null
-          timeout 30 $ADB shell wm dismiss-keyguard 2>/dev/null
+          A="adb -s localhost:5555"
+          timeout 30 $A shell settings put global device_provisioned 1 2>/dev/null
+          timeout 30 $A shell settings put secure user_setup_complete 1 2>/dev/null
+          timeout 30 $A shell settings put global package_verifier_enable 0 2>/dev/null
+          timeout 30 $A shell settings put global window_animation_scale 0.5 2>/dev/null
+          timeout 30 $A shell settings put global transition_animation_scale 0.5 2>/dev/null
+          timeout 30 $A shell settings put global animator_duration_scale 0.5 2>/dev/null
+          timeout 30 $A shell settings put system screen_off_timeout 600000 2>/dev/null
+          timeout 30 $A shell settings put global stay_on_while_plugged_in 3 2>/dev/null
+          timeout 30 $A shell svc power stayon true 2>/dev/null
+          timeout 30 $A shell wm dismiss-keyguard 2>/dev/null
           echo "[OK] Android settings set"
           fdl() {
-            ID="$1"
-            VC=$(timeout 30 curl -s --max-time 25 "https://f-droid.org/api/v1/packages/$ID" | grep -o '"suggestedVersionCode":[0-9]*' | head -1 | cut -d: -f2)
-            if [ -z "$VC" ]; then echo "[WARN] $ID : version nahi mila"; return 0; fi
-            echo "--- $ID build $VC ---"
-            timeout 300 curl -sL --max-time 280 -o /tmp/app.apk "https://f-droid.org/repo/${ID}_${VC}.apk"
-            if [ ! -s /tmp/app.apk ]; then
-              echo "[WARN] $ID : download fail"
-              rm -f /tmp/app.apk
-              return 0
-            fi
-            timeout 240 $ADB install -r /tmp/app.apk 2>&1 | tail -1
+            VC=$(timeout 30 curl -s --max-time 25 "https://f-droid.org/api/v1/packages/$1" | grep -o '"suggestedVersionCode":[0-9]*' | head -1 | cut -d: -f2)
+            if [ -z "$VC" ]; then echo "[WARN] $1 : version nahi mila"; return 0; fi
+            echo "--- $1 build $VC ---"
+            timeout 300 curl -sL --max-time 280 -o /tmp/app.apk "https://f-droid.org/repo/$1_$VC.apk"
+            if [ ! -s /tmp/app.apk ]; then echo "[WARN] $1 : download fail"; rm -f /tmp/app.apk; return 0; fi
+            timeout 240 $A install -r /tmp/app.apk 2>&1 | tail -1
             rm -f /tmp/app.apk
           }
-          echo "===== F-Droid apps ====="
+          echo "===== apps ====="
           fdl com.tailscale.ipn
           fdl org.mozilla.fennec_fdroid
           fdl org.videolan.vlc
           fdl org.schabi.newpipe
-          echo "===== Chrome / Chromium ====="
+          echo "===== Chrome ====="
           timeout 400 curl -sL --max-time 380 -o /tmp/chrome.apk https://github.com/bromite/bromite/releases/download/108.0.5359.156/x64_ChromePublic.apk
           if [ -s /tmp/chrome.apk ]; then
-            timeout 300 $ADB install -r /tmp/chrome.apk 2>&1 | tail -1
+            timeout 300 $A install -r /tmp/chrome.apk 2>&1 | tail -1
             echo "[OK] Chrome install ho gaya"
           else
             echo "[WARN] Chrome download nahi hua"
           fi
           rm -f /tmp/chrome.apk
-          echo "--- installed apps ---"
-          timeout 30 $ADB shell pm list packages 2>/dev/null | grep -E 'tailscale|fennec|bromite|vlc|newpipe|fdroid'
-          timeout 30 $ADB shell monkey -p com.tailscale.ipn 1 > /dev/null 2>&1
-          echo "[OK] Tailscale app khol diya - usme apna account login kar lena"
+          timeout 30 $A shell pm list packages 2>/dev/null | grep -E 'tailscale|fennec|bromite|vlc|newpipe'
 
-      - name: '5 Display and network'
+      - name: '5 Screen aur network'
         shell: bash
         run: |
           set +e
@@ -562,77 +494,88 @@ jobs:
             nohup Xvfb :99 -screen 0 ${AW}x${AH}x24 -ac +extension GLX +render -noreset > /tmp/xvfb.log 2>&1 &
             sleep 4
             export DISPLAY=:99
-            try_scrcpy() {
-              nohup scrcpy -s localhost:5555 "$@" > /tmp/scrcpy.log 2>&1 &
-              sleep 10
-              if pgrep -x scrcpy > /dev/null; then return 0; else return 1; fi
-            }
+            try() { nohup scrcpy -s localhost:5555 "$@" > /tmp/scrcpy.log 2>&1 & sleep 10; pgrep -x scrcpy > /dev/null; }
             SC=0
-            if try_scrcpy --no-audio --stay-awake --disable-screensaver --window-x 0 --window-y 0 --window-width $AW --window-height $AH; then
-              SC=1; echo "[OK] scrcpy chala (window mode)"
-            elif try_scrcpy --no-audio --window-width $AW --window-height $AH; then
-              SC=1; echo "[OK] scrcpy chala (simple window)"
-            elif try_scrcpy -m 1200; then
-              SC=1; echo "[OK] scrcpy chala (max size)"
-            elif try_scrcpy; then
-              SC=1; echo "[OK] scrcpy chala (default)"
-            else
-              echo "[FAIL] scrcpy nahi chala"
-            fi
-            if [ "$SC" = "0" ]; then tail -8 /tmp/scrcpy.log; fi
+            if try --no-audio --stay-awake --disable-screensaver --window-x 0 --window-y 0 --window-width $AW --window-height $AH; then SC=1; echo "[OK] scrcpy chala (window)"
+            elif try --no-audio --window-width $AW --window-height $AH; then SC=1; echo "[OK] scrcpy chala (simple)"
+            elif try -m 1200; then SC=1; echo "[OK] scrcpy chala (max size)"
+            elif try; then SC=1; echo "[OK] scrcpy chala (default)"
+            else echo "[FAIL] scrcpy nahi chala"; tail -6 /tmp/scrcpy.log; fi
             nohup x11vnc -display :99 -forever -shared -nopw -rfbport 5900 -quiet > /tmp/x11vnc.log 2>&1 &
             sleep 3
             nohup websockify --web=/usr/share/novnc 6080 localhost:5900 > /tmp/novnc.log 2>&1 &
             sleep 3
             pgrep -x Xvfb > /dev/null && echo "[OK] Xvfb" || echo "[FAIL] Xvfb"
             pgrep -x scrcpy > /dev/null && echo "[OK] scrcpy" || echo "[FAIL] scrcpy"
-            pgrep -x x11vnc > /dev/null && echo "[OK] x11vnc" || echo "[FAIL] x11vnc"
-            PW=$(head -c 12 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 12)
-            printf '%s\n' "runner:$PW" > /tmp/pwfile
-            sudo chpasswd < /tmp/pwfile
-            echo "RDPPW=$PW" >> $GITHUB_ENV
-            printf '%s\n' \
-            '#!/bin/bash' \
-            'xfwm4 &' \
-            'sleep 1' \
-            'S="scrcpy -s localhost:5555 --no-audio --stay-awake --disable-screensaver"' \
-            '$S --window-maximized || $S -m 1600 || $S' > ~/.xsession
-            chmod +x ~/.xsession
-            sudo sed -i 's/^allowed_users=.*/allowed_users=anybody/' /etc/xrdp/sesman.ini 2>/dev/null
-            sudo service xrdp restart 2>/dev/null || sudo /usr/sbin/xrdp 2>/dev/null || true
-            echo "[OK] RDP ready - Microsoft Remote Desktop se connect karo"
+            pgrep -x x11vnc > /dev/null && echo "[OK] VNC :5900" || echo "[FAIL] x11vnc"
+            pgrep -f websockify > /dev/null && echo "[OK] noVNC :6080" || echo "[FAIL] websockify"
           else
-            echo "[WARN] Android screen nahi chala - Tailscale aur link phir bhi chalenge"
+            echo "[WARN] Android screen nahi chala"
+          fi
+          echo "---------------- Tailscale ----------------"
+          T=/tmp/ts; mkdir -p $T; rm -f $T/tailscale $T/tailscaled
+          timeout 240 curl -fsSL --max-time 200 https://pkgs.tailscale.com/stable/tailscale_latest_amd64.tgz -o /tmp/ts.tgz
+          tar -xzf /tmp/ts.tgz -C $T --strip-components=1 2>/dev/null
+          TS=$T/tailscale; TSD=$T/tailscaled
+          if [ ! -x "$TSD" ]; then
+            echo "[WARN] static download fail - install.sh try"
+            timeout 180 curl -fsSL --max-time 150 https://tailscale.com/install.sh | sh > /tmp/tsi.log 2>&1
+            TS=$(command -v tailscale); TSD=$(command -v tailscaled)
+          fi
+          if [ -z "$TSD" ]; then echo "[FAIL] tailscale binary nahi mila"; fi
+          echo "[OK] binary = $TSD"
+          K='${{ secrets.TAILSCALE_AUTH_KEY }}'
+          HN="android-$GITHUB_RUN_ID"
+          IP=""
+          ts_up() {
+            pkill -x tailscaled 2>/dev/null
+            sudo pkill -x tailscaled 2>/dev/null
+            rm -f /tmp/ts.sock /tmp/ts.state
+            sleep 1
+            if [ "$1" = "kern" ] && [ -c /dev/net/tun ]; then
+              SU="sudo"; EX=""
+            else
+              SU=""; EX="--tun=userspace-networking"
+            fi
+            $SU nohup $TSD $EX --state=/tmp/ts.state --socket=/tmp/ts.sock > /tmp/tsd.log 2>&1 &
+            sleep 7
+            if ! pgrep -x tailscaled > /dev/null; then echo "[WARN] $1: daemon nahi chala"; return 1; fi
+            if ! timeout 25 $SU $TS --socket=/tmp/ts.sock status > /dev/null 2>&1; then echo "[WARN] $1: socket connect fail"; return 1; fi
+            echo "[OK] tailscaled chala (mode $1)"
+            if ! echo "$K" | grep -q '^tskey-auth-'; then return 0; fi
+            timeout 70 $SU $TS --socket=/tmp/ts.sock up --reset --timeout=60s --authkey="$K" --hostname="$HN" --accept-routes > /tmp/tsup.log 2>&1
+            for i in $(seq 1 12); do
+              IP=$(timeout 15 $SU $TS --socket=/tmp/ts.sock ip -4 2>/dev/null | grep '^100\.' | head -1)
+              if [ -n "$IP" ]; then break; fi
+              sleep 5
+            done
+            if [ -n "$IP" ]; then echo "[OK] Tailscale IP = $IP"; return 0; fi
+            echo "[WARN] $1: IP nahi mila"; tail -6 /tmp/tsd.log 2>/dev/null; return 1
+          }
+          if [ -n "$TSD" ]; then
+            ts_up kern || { echo "[..] kernel mode fail - userspace mode try"; ts_up user || echo "[FAIL] Tailscale nahi chala"; }
+          fi
+          if [ -n "$IP" ]; then
+            echo "TS_IP=$IP" >> $GITHUB_ENV
+          elif [ -n "$TSD" ]; then
+            if echo "$K" | grep -q '^tskey-auth-'; then
+              echo "[WARN] Tailscale IP nahi mila - browser link use karo"
+              tail -12 /tmp/tsd.log 2>/dev/null
+              tail -5 /tmp/tsup.log 2>/dev/null
+            else
+              ( timeout 40 $SU $TS --socket=/tmp/ts.sock up --reset --hostname="$HN" --timeout=25s > /tmp/tsup.log 2>&1 & )
+              AU=""
+              for i in $(seq 1 8); do
+                sleep 4
+                AU=$(timeout 15 $SU $TS --socket=/tmp/ts.sock status --json 2>/dev/null | grep -o '"AuthURL" *: *"[^"]*"' | head -1 | sed 's/.*: *"//;s/"$//')
+                if [ -n "$AU" ]; then break; fi
+              done
+              if [ -n "$AU" ]; then echo "TS_LOGIN=$AU" >> $GITHUB_ENV; echo "[OK] LOGIN LINK: $AU"; else echo "[WARN] login link nahi mila - TAILSCALE_AUTH_KEY daalo"; fi
+            fi
           fi
 
-          echo "--- Tailscale ---"
-          timeout 180 curl -fsSL --max-time 150 https://tailscale.com/install.sh | sh 2>&1 | tail -2
-          K="${{ secrets.TAILSCALE_AUTH_KEY }}"
-          IP=""
-          sudo mkdir -p /var/lib/tailscale /var/run/tailscale
-          if ! pgrep -x tailscaled > /dev/null; then
-            if [ -c /dev/net/tun ]; then
-              sudo nohup tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock > /tmp/tailscaled.log 2>&1 &
-            else
-              sudo nohup tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock > /tmp/tailscaled.log 2>&1 &
-            fi
-            sleep 6
-          fi
-          pgrep -x tailscaled > /dev/null && echo "[OK] tailscaled running" || echo "[WARN] tailscaled nahi chala"
-          if echo "$K" | grep -q '^tskey-auth-'; then
-            timeout 120 sudo tailscale up --authkey="$K" --hostname="android-$GITHUB_RUN_ID" --accept-routes 2>&1 | tail -3
-            for i in $(seq 1 12); do
-              IP=$(timeout 20 sudo tailscale ip -4 2>/dev/null | grep '^100\.' | head -1)
-              if [ -n "$IP" ]; then break; fi
-              sleep 8
-            done
-            if [ -n "$IP" ]; then echo "TS_IP=$IP" >> $GITHUB_ENV; echo "[OK] Tailscale IP = $IP"; else echo "[WARN] Tailscale IP nahi mila"; tail -5 /tmp/tailscaled.log 2>/dev/null; fi
-          else
-            timeout 100 sudo tailscale up --hostname="android-$GITHUB_RUN_ID" > /tmp/ts.log 2>&1
-            L=$(grep -o 'https://login.tailscale.com/[^ ]*' /tmp/ts.log | head -1)
-            if [ -n "$L" ]; then echo "TS_LOGIN=$L" >> $GITHUB_ENV; echo "TAILSCALE LOGIN: $L"; else echo "[WARN] login link nahi mila"; fi
-          fi
           if [ "$WEB" = "yes" ]; then
+            echo "---------------- Browser link ----------------"
             timeout 150 curl -sL --max-time 120 -o /tmp/cf https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
             chmod +x /tmp/cf
             nohup /tmp/cf tunnel --url http://127.0.0.1:6080 --no-autoupdate > /tmp/cf.log 2>&1 &
@@ -642,7 +585,7 @@ jobs:
               LINK=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' /tmp/cf.log | head -1)
               if [ -n "$LINK" ]; then break; fi
             done
-            if [ -n "$LINK" ]; then echo "CF_LINK=$LINK" >> $GITHUB_ENV; echo "[OK] browser link mil gaya"; else echo "[WARN] tunnel nahi bana"; fi
+            if [ -n "$LINK" ]; then echo "CF_LINK=$LINK" >> $GITHUB_ENV; echo "[OK] browser link mil gaya"; else echo "[WARN] tunnel nahi bana"; tail -5 /tmp/cf.log 2>/dev/null; fi
           fi
 
       - name: '6 Health check'
@@ -652,46 +595,37 @@ jobs:
           echo "=============================================="
           echo "  HEALTH CHECK - ANDROID"
           echo "=============================================="
-          chk() {
-            if [ "$1" = "0" ]; then echo "[OK] $2"; else echo "[FAIL] $2"; fi
-          }
+          chk() { if [ "$1" = "0" ]; then echo "[OK] $2"; else echo "[FAIL] $2"; fi; }
           pgrep -x Xvfb > /dev/null; chk $? "Xvfb display"
           pgrep -x scrcpy > /dev/null; chk $? "scrcpy mirror"
-          pgrep -x x11vnc > /dev/null; chk $? "x11vnc :5900"
-          pgrep -f websockify > /dev/null; chk $? "websockify :6080"
+          pgrep -x x11vnc > /dev/null; chk $? "VNC :5900"
+          pgrep -f websockify > /dev/null; chk $? "noVNC :6080"
           timeout 30 sudo docker ps --filter name=redroid --format '{{.Status}}' 2>/dev/null | grep -q 'Up'; chk $? "redroid container"
           timeout 20 adb -s localhost:5555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' | grep -q '^1$'; chk $? "Android booted"
-          timeout 20 adb -s localhost:5555 shell pm list packages 2>/dev/null | grep -q 'org.fdroid.fdroid'; chk $? "F-Droid app"
-          timeout 10 bash -c 'echo > /dev/tcp/127.0.0.1/5555' 2>/dev/null; chk $? "ADB port 5555 open"
+          timeout 10 bash -c 'echo > /dev/tcp/127.0.0.1/5555' 2>/dev/null; chk $? "ADB port 5555"
+          timeout 10 bash -c 'echo > /dev/tcp/127.0.0.1/5900' 2>/dev/null; chk $? "VNC port open"
           echo "=============================================="
           echo "  ANDROID TAIYAR HAI"
           echo "=============================================="
           echo "  Screen : ${AW}x${AH} dpi ${ADPI}"
-          if [ -n "$TS_IP" ] && [ -n "$RDPPW" ]; then
-            echo "  ==== BEST CONTROL (RD app) ===="
-            echo "  ADDRESS : $TS_IP:3389"
-            echo "  USER    : runner"
-            echo "  PASS    : $RDPPW"
-            echo "  ==============================="
-          fi
-          echo "=============================================="
           if [ -n "$TS_IP" ]; then
-            echo "  ====== FULL CONTROL (scrcpy) ======"
-            echo "  PC/LAPTOP : scrcpy --tcpip=$TS_IP:5555"
-            echo "  PHONE app : address $TS_IP  port 5555"
-            echo "  ADB test  : adb connect $TS_IP:5555"
-            echo "  ==================================="
+            echo "  == BEST: PC/laptop se scrcpy =="
+            echo "  scrcpy --tcpip=$TS_IP:5555"
+            echo "  -------------------------------"
+            echo "  == PHONE: koi bhi VNC app =="
+            echo "  ADDRESS : $TS_IP"
+            echo "  PORT    : 5900"
+            echo "  PASS    : koi nahi (blank)"
           else
-            echo "  Tailscale key nahi hai - sirf WEB link chalega"
-            echo "  Full control ke liye TAILSCALE_AUTH_KEY daalo"
-            if [ -n "$TS_LOGIN" ]; then echo "  LOGIN : $TS_LOGIN"; fi
+            echo "  Tailscale nahi chala - sirf browser link chalega"
+            if [ -n "$TS_LOGIN" ]; then echo "  LOGIN   : $TS_LOGIN"; fi
           fi
           if [ -n "$CF_LINK" ]; then
-            echo "  WEB backup: $CF_LINK/vnc.html?autoconnect=true&resize=scale"
+            echo "  == BROWSER (backup) =="
+            echo "  $CF_LINK/vnc.html?autoconnect=true&resize=scale"
           fi
-          echo "  TIME : ${{ inputs.hours }} ghante"
+          echo "  TIME    : ${{ inputs.hours }} ghante"
           echo "=============================================="
-
       - name: '7 Keep alive'
         shell: bash
         run: |
@@ -703,51 +637,46 @@ jobs:
             if [ $T -lt $S ]; then S=$T; fi
             sleep $S
             T=$((T-S))
-            echo "[alive] bache $((T/60)) min  |  $(date +%H:%M:%S)"
+            echo "[alive] bache $((T/60)) min | $(date +%H:%M:%S)"
             pgrep -x scrcpy > /dev/null || echo "[warn] scrcpy dead"
           done
           echo "TIME OVER"
 
+  # ================= WINDOWS 11 =================
   windows:
     if: inputs.os == 'windows11'
     runs-on: windows-latest
     steps:
 
-      - name: '1 User and password'
+      - name: '1 User aur RDP'
         shell: pwsh
         run: |
           $p = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 14 | ForEach-Object { [char]$_ })
           net user RDP "$p" /add /y
           net localgroup administrators RDP /add
           net localgroup "Remote Desktop Users" RDP /add
-          Add-Content -Path $env:GITHUB_ENV -Value "RDPPW=$p"
-          Write-Output "[OK] user RDP ban gaya"
-
-      - name: '2 Enable RDP'
-        shell: pwsh
-        run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'UserAuthentication' -Value 0
           Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'
           netsh advfirewall firewall add rule name='RDP3389' dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force -ErrorAction SilentlyContinue
-          Write-Output "[OK] RDP on ho gaya"
+          Add-Content -Path $env:GITHUB_ENV -Value "RDPPW=$p"
+          Write-Output "[OK] user RDP ban gaya + RDP on"
 
-      - name: '3 Tailscale'
+      - name: '2 Tailscale'
         shell: pwsh
         run: |
           $msi = "$env:TEMP\tailscale.msi"
-          Invoke-WebRequest -Uri 'https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi' -OutFile $msi -UseBasicParsing
+          Invoke-WebRequest -Uri 'https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi' -OutFile $msi -UseBasicParsing -TimeoutSec 180
           Start-Process msiexec.exe -ArgumentList '/i', $msi, '/quiet', '/norestart' -Wait
-          Start-Sleep -Seconds 5
+          Start-Sleep -Seconds 6
           $ts = 'C:\Program Files\Tailscale\tailscale.exe'
           $k = '${{ secrets.TAILSCALE_AUTH_KEY }}'
           if ($k -like 'tskey-auth-*') {
-            $o = "$env:TEMP\ts_out.txt"
-            $e = "$env:TEMP\ts_err.txt"
-            $a = @('up', "--authkey=$k", "--hostname=winpc-$env:GITHUB_RUN_ID", '--accept-routes')
+            $o = "$env:TEMP\ts_out.txt"; $e = "$env:TEMP\ts_err.txt"
+            $a = @('up','--reset',"--authkey=$k","--hostname=winpc-$env:GITHUB_RUN_ID",'--accept-routes','--timeout=60s')
             Start-Process -FilePath $ts -ArgumentList $a -RedirectStandardOutput $o -RedirectStandardError $e -NoNewWindow -Wait
-            Get-Content $o, $e -ErrorAction SilentlyContinue | Select-Object -Last 5
+            Get-Content $o, $e -ErrorAction SilentlyContinue | Select-Object -Last 4
             $ip = ''
             for ($i = 0; $i -lt 12; $i++) {
               $ip = (& $ts ip -4 2>$null | Select-Object -First 1)
@@ -758,30 +687,23 @@ jobs:
               Add-Content -Path $env:GITHUB_ENV -Value "TS_IP=$ip"
               Write-Output "[OK] Tailscale IP = $ip"
             } else {
-              Write-Output "[WARN] Tailscale IP nahi mila"
+              Write-Output "[WARN] Tailscale IP nahi mila - browser link use karo"
+              & $ts status 2>$null
             }
           } else {
-            Write-Output "[WARN] TAILSCALE_AUTH_KEY galat ya nahi hai"
+            Write-Output "[WARN] TAILSCALE_AUTH_KEY nahi hai - sirf browser link chalega"
           }
 
-      - name: '3b Gaming setup'
+      - name: '3 Chrome aur gaming'
         if: inputs.gaming == 'yes'
         shell: pwsh
         run: |
-          Write-Output "--- Chrome ---"
-          winget install --exact --id Google.Chrome --accept-package-agreements --accept-source-agreements
-          Write-Output "--- Steam ---"
-          winget install --exact --id Valve.Steam --accept-package-agreements --accept-source-agreements
-          Write-Output "--- Cloud gaming shortcuts ---"
-          $d = "$env:PUBLIC\Desktop"
-          $links = @{
-            'GeForce NOW'    = 'https://play.geforcenow.com'
-            'Xbox Game Pass' = 'https://www.xbox.com/play'
-            'Boosteroid'     = 'https://boosteroid.com'
-          }
+          winget install --exact --id Google.Chrome --accept-package-agreements --accept-source-agreements 2>&1 | Select-Object -Last 2
+          winget install --exact --id Valve.Steam --accept-package-agreements --accept-source-agreements 2>&1 | Select-Object -Last 2
           $w = New-Object -ComObject WScript.Shell
+          $links = @{ 'GeForce NOW' = 'https://play.geforcenow.com'; 'Xbox Game Pass' = 'https://www.xbox.com/play'; 'Boosteroid' = 'https://boosteroid.com' }
           foreach ($k in $links.Keys) {
-            $s = $w.CreateShortcut("$d\$k.url")
+            $s = $w.CreateShortcut("$env:PUBLIC\Desktop\$k.url")
             $s.TargetPath = $links[$k]
             $s.Save()
             Write-Output "[OK] shortcut $k"
@@ -793,60 +715,30 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
-          Write-Output "--- TightVNC ---"
-          try {
-            winget install --exact --id GlavSoft.TightVNC --silent --accept-package-agreements --accept-source-agreements 2>&1 | Select-Object -Last 3
-          } catch {
-            Write-Output "[WARN] TightVNC install fail"
-          }
-          Start-Sleep -Seconds 5
+          try { winget install --exact --id GlavSoft.TightVNC --silent --accept-package-agreements --accept-source-agreements 2>&1 | Select-Object -Last 2 } catch { Write-Output "[WARN] TightVNC install fail" }
+          Start-Sleep -Seconds 6
           $vnc = 'C:\Program Files\TightVNC\tvnserver.exe'
           if (Test-Path $vnc) {
-            try {
-              Start-Process -FilePath $vnc -ArgumentList '-run' -WindowStyle Hidden
-              Write-Output "[OK] TightVNC started :5900"
-            } catch {
-              Write-Output "[WARN] TightVNC start fail"
-            }
-          } else {
-            Write-Output "[WARN] TightVNC nahi mila"
-          }
-          Write-Output "--- websockify + noVNC ---"
+            try { Start-Process -FilePath $vnc -ArgumentList '-run' -WindowStyle Hidden; Write-Output "[OK] TightVNC :5900" } catch { Write-Output "[WARN] TightVNC start fail" }
+          } else { Write-Output "[WARN] TightVNC nahi mila" }
           try {
             python -m pip install --quiet websockify 2>&1 | Out-Null
-            Invoke-WebRequest -Uri 'https://github.com/novnc/noVNC/archive/refs/heads/master.zip' -OutFile "$env:TEMP\novnc.zip" -UseBasicParsing
+            Invoke-WebRequest -Uri 'https://github.com/novnc/noVNC/archive/refs/heads/master.zip' -OutFile "$env:TEMP\novnc.zip" -UseBasicParsing -TimeoutSec 180
             Expand-Archive -Path "$env:TEMP\novnc.zip" -DestinationPath "$env:TEMP" -Force
             $nv = Get-ChildItem "$env:TEMP\noVNC-*" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($nv) {
-              Start-Process -FilePath 'python' -ArgumentList '-m','websockify','--web',$nv.FullName,'6080','localhost:5900' -WindowStyle Hidden
-              Write-Output "[OK] websockify :6080"
-            }
-          } catch {
-            Write-Output "[WARN] websockify setup fail"
-          }
-          Write-Output "--- cloudflared tunnel ---"
+            if ($nv) { Start-Process -FilePath 'python' -ArgumentList '-m','websockify','--web',$nv.FullName,'6080','localhost:5900' -WindowStyle Hidden; Write-Output "[OK] noVNC :6080" }
+          } catch { Write-Output "[WARN] websockify setup fail" }
           try {
-            Invoke-WebRequest -Uri 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe' -OutFile "$env:TEMP\cf.exe" -UseBasicParsing
+            Invoke-WebRequest -Uri 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe' -OutFile "$env:TEMP\cf.exe" -UseBasicParsing -TimeoutSec 180
             Start-Process -FilePath "$env:TEMP\cf.exe" -ArgumentList 'tunnel','--url','http://127.0.0.1:6080','--no-autoupdate' -RedirectStandardOutput "$env:TEMP\cf_out.txt" -RedirectStandardError "$env:TEMP\cf_err.txt" -WindowStyle Hidden
             $link = ''
             for ($i = 0; $i -lt 15; $i++) {
               Start-Sleep -Seconds 4
-              $txt = Get-Content "$env:TEMP\cf_out.txt","$env:TEMP\cf_err.txt" -ErrorAction SilentlyContinue
-              $m = $txt | Select-String -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com' | Select-Object -First 1
-              if ($m) {
-                $link = $m.Matches[0].Value
-                break
-              }
+              $m = Get-Content "$env:TEMP\cf_out.txt","$env:TEMP\cf_err.txt" -ErrorAction SilentlyContinue | Select-String -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com' | Select-Object -First 1
+              if ($m) { $link = $m.Matches[0].Value; break }
             }
-            if ($link) {
-              Add-Content -Path $env:GITHUB_ENV -Value "CF_LINK=$link"
-              Write-Output "[OK] WEB : $link/vnc.html?autoconnect=true&resize=scale"
-            } else {
-              Write-Output "[WARN] tunnel link nahi mila"
-            }
-          } catch {
-            Write-Output "[WARN] cloudflared fail"
-          }
+            if ($link) { Add-Content -Path $env:GITHUB_ENV -Value "CF_LINK=$link"; Write-Output "[OK] browser link mil gaya" } else { Write-Output "[WARN] tunnel link nahi mila" }
+          } catch { Write-Output "[WARN] cloudflared fail" }
 
       - name: '5 Health check'
         shell: pwsh
@@ -854,21 +746,16 @@ jobs:
          Write-Output "=============================================="
           Write-Output "  WINDOWS 11 PC TAIYAR HAI"
           Write-Output "=============================================="
-          if ($env:TS_IP) {
-            Write-Output "  RDP  : $env:TS_IP:3389"
-            if ($env:CF_LINK) { Write-Output "  WEB  : $env:CF_LINK/vnc.html?autoconnect=true&resize=scale" }
-          } else {
-            Write-Output "  RDP  : Tailscale key nahi hai"
-            if ($env:CF_LINK) { Write-Output "  WEB  : $env:CF_LINK/vnc.html?autoconnect=true&resize=scale" }
-          }
-          Write-Output "  USER : RDP"
-          Write-Output "  PASS : $env:RDPPW"
-          Write-Output "  TIME : ${{ inputs.hours }} ghante"
+          if ($env:TS_IP) { Write-Output "  == RDP (sabse best) =="; Write-Output "  ADDRESS : $env:TS_IP:3389" }
+          else { Write-Output "  Tailscale nahi chala - browser link use karo" }
+          Write-Output "  USER    : RDP"
+          Write-Output "  PASS    : $env:RDPPW"
+          if ($env:CF_LINK) { Write-Output "  == BROWSER (backup) =="; Write-Output "  $env:CF_LINK/vnc.html?autoconnect=true&resize=scale" }
+          Write-Output "  TIME    : ${{ inputs.hours }} ghante"
           Write-Output "=============================================="
           $svc = Get-Service -Name TermService -ErrorAction SilentlyContinue
           if ($svc) { Write-Output "[OK] TermService = $($svc.Status)" }
-          $u = Get-LocalUser -Name RDP -ErrorAction SilentlyContinue
-          if ($u) { Write-Output "[OK] user RDP maujood hai" }
+          if (Get-LocalUser -Name RDP -ErrorAction SilentlyContinue) { Write-Output "[OK] user RDP maujood hai" }
 
       - name: '6 Keep alive'
         shell: pwsh
@@ -879,6 +766,6 @@ jobs:
           while ((Get-Date) -lt $end) {
             Start-Sleep -Seconds 300
             $left = $end - (Get-Date)
-            Write-Output "[alive] bache $([math]::Round($left.TotalMinutes)) min  |  $(Get-Date -Format 'HH:mm:ss')"
+            Write-Output "[alive] bache $([math]::Round($left.TotalMinutes)) min | $(Get-Date -Format 'HH:mm:ss')"
           }
           Write-Output "TIME OVER"

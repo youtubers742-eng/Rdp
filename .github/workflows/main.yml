@@ -181,9 +181,8 @@ jobs:
           sudo chpasswd < /tmp/pwfile
           echo "RDPPW=$PW" >> $GITHUB_ENV
           echo "[OK] user runner ka password set"
-          printf '%s\n' 'startxfce4' > ~/.xsession
-          sudo sed -i 's/^allowed_users=.*/allowed_users=anybody/' /etc/xrdp/sesman.ini 2>/dev/null
-          sudo sed -i 's/^#\?autorun=.*/autorun=/' /etc/xrdp/sesman.ini 2>/dev/null
+          sudo sed -i '/^\[Xorg\]/,$d' /etc/xrdp/xrdp.ini
+          printf '%s\n' '[cloudpc]' 'name=CloudPC' 'lib=libvnc.so' 'username=na' 'password=na' 'ip=127.0.0.1' 'port=5900' | sudo tee -a /etc/xrdp/xrdp.ini > /dev/null
           sudo service xrdp restart 2>/dev/null || sudo /usr/sbin/xrdp 2>/dev/null || true
           sleep 3
           rm -rf /tmp/.X99-lock
@@ -224,59 +223,58 @@ jobs:
           tar -xzf /tmp/ts.tgz -C $T --strip-components=1 2>/dev/null
           TS=$T/tailscale; TSD=$T/tailscaled
           if [ ! -x "$TSD" ]; then
-            echo "[WARN] static download fail - install.sh try"
             timeout 180 curl -fsSL --max-time 150 https://tailscale.com/install.sh | sh > /tmp/tsi.log 2>&1
             TS=$(command -v tailscale); TSD=$(command -v tailscaled)
           fi
-          if [ -z "$TSD" ]; then echo "[FAIL] tailscale binary nahi mila"; fi
-          echo "[OK] binary = $TSD"
+          echo "[OK] tailscale binary = $TSD"
           K='${{ secrets.TAILSCALE_AUTH_KEY }}'
-          HN="cloudpc-$GITHUB_RUN_ID"
+          HN="cloudpc-linux"
           IP=""
-          ts_up() {
-            pkill -x tailscaled 2>/dev/null
-            sudo pkill -x tailscaled 2>/dev/null
-            rm -f /tmp/ts.sock /tmp/ts.state
-            sleep 1
-            if [ "$1" = "kern" ] && [ -c /dev/net/tun ]; then
-              SU="sudo"; EX=""
-            else
-              SU=""; EX="--tun=userspace-networking"
-            fi
-            $SU nohup $TSD $EX --state=/tmp/ts.state --socket=/tmp/ts.sock > /tmp/tsd.log 2>&1 &
-            sleep 7
-            if ! pgrep -x tailscaled > /dev/null; then echo "[WARN] $1: daemon nahi chala"; return 1; fi
-            if ! timeout 25 $SU $TS --socket=/tmp/ts.sock status > /dev/null 2>&1; then echo "[WARN] $1: socket connect fail"; return 1; fi
+          ts_try() {
+            pkill -x tailscaled 2>/dev/null; sudo pkill -x tailscaled 2>/dev/null
+            rm -f /tmp/ts.sock /tmp/ts.state; sleep 1
+            case "$1" in
+              systemd) sudo systemctl start tailscaled 2>/dev/null; SU="sudo"; SOCK="";;
+              kern)    [ -c /dev/net/tun ] || { echo "[WARN] kern: /dev/net/tun nahi hai"; return 1; }
+                       sudo nohup $TSD --state=/tmp/ts.state --socket=/tmp/ts.sock > /tmp/tsd.log 2>&1 &
+                       SU="sudo"; SOCK="--socket=/tmp/ts.sock";;
+              user)    nohup $TSD --tun=userspace-networking --state=/tmp/ts.state --socket=/tmp/ts.sock > /tmp/tsd.log 2>&1 &
+                       SU=""; SOCK="--socket=/tmp/ts.sock";;
+            esac
+            sleep 8
+            if ! pgrep -x tailscaled > /dev/null; then echo "[WARN] $1: daemon nahi chala"; tail -4 /tmp/tsd.log 2>/dev/null; return 1; fi
+            if ! timeout 25 $SU $TS $SOCK status > /dev/null 2>&1; then echo "[WARN] $1: socket connect fail"; return 1; fi
             echo "[OK] tailscaled chala (mode $1)"
-            if ! echo "$K" | grep -q '^tskey-auth-'; then return 0; fi
-            timeout 70 $SU $TS --socket=/tmp/ts.sock up --reset --timeout=60s --authkey="$K" --hostname="$HN" --accept-routes > /tmp/tsup.log 2>&1
+            if ! echo "$K" | grep -q '^tskey-auth-'; then echo "[WARN] TAILSCALE_AUTH_KEY galat hai ya khali hai"; return 0; fi
+            timeout 80 $SU $TS $SOCK up --reset --timeout=70s --authkey="$K" --hostname="$HN" --accept-routes > /tmp/tsup.log 2>&1
+            echo "--- tailscale up bola: ---"; tail -4 /tmp/tsup.log 2>/dev/null
             for i in $(seq 1 12); do
-              IP=$(timeout 15 $SU $TS --socket=/tmp/ts.sock ip -4 2>/dev/null | grep '^100\.' | head -1)
+              IP=$(timeout 15 $SU $TS $SOCK ip -4 2>/dev/null | grep '^100\.' | head -1)
               if [ -n "$IP" ]; then break; fi
               sleep 5
             done
-            if [ -n "$IP" ]; then echo "[OK] Tailscale IP = $IP"; return 0; fi
+            if [ -n "$IP" ]; then echo "[OK] TAILSCALE IP = $IP"; return 0; fi
             echo "[WARN] $1: IP nahi mila"; tail -6 /tmp/tsd.log 2>/dev/null; return 1
           }
           if [ -n "$TSD" ]; then
-            ts_up kern || { echo "[..] kernel mode fail - userspace mode try"; ts_up user || echo "[FAIL] Tailscale nahi chala"; }
+            for m in systemd kern user; do if ts_try $m; then break; fi; done
           fi
           if [ -n "$IP" ]; then
             echo "TS_IP=$IP" >> $GITHUB_ENV
           elif [ -n "$TSD" ]; then
             if echo "$K" | grep -q '^tskey-auth-'; then
-              echo "[WARN] Tailscale IP nahi mila - browser link use karo"
+              echo "[FAIL] Tailscale nahi chala. Niche wala error mujhe bhej do:"
               tail -12 /tmp/tsd.log 2>/dev/null
-              tail -5 /tmp/tsup.log 2>/dev/null
+              tail -8 /tmp/tsup.log 2>/dev/null
             else
-              ( timeout 40 $SU $TS --socket=/tmp/ts.sock up --reset --hostname="$HN" --timeout=25s > /tmp/tsup.log 2>&1 & )
+              ( timeout 40 $SU $TS $SOCK up --reset --hostname="$HN" --timeout=25s > /tmp/tsup.log 2>&1 & )
               AU=""
               for i in $(seq 1 8); do
                 sleep 4
-                AU=$(timeout 15 $SU $TS --socket=/tmp/ts.sock status --json 2>/dev/null | grep -o '"AuthURL" *: *"[^"]*"' | head -1 | sed 's/.*: *"//;s/"$//')
+                AU=$(timeout 15 $SU $TS $SOCK status --json 2>/dev/null | grep -o '"AuthURL" *: *"[^"]*"' | head -1 | sed 's/.*: *"//;s/"$//')
                 if [ -n "$AU" ]; then break; fi
               done
-              if [ -n "$AU" ]; then echo "TS_LOGIN=$AU" >> $GITHUB_ENV; echo "[OK] LOGIN LINK: $AU"; else echo "[WARN] login link nahi mila - TAILSCALE_AUTH_KEY daalo"; fi
+              if [ -n "$AU" ]; then echo "TS_LOGIN=$AU" >> $GITHUB_ENV; echo "[OK] LOGIN LINK: $AU"; else echo "[WARN] login link nahi mila"; fi
             fi
           fi
 
@@ -315,14 +313,11 @@ jobs:
           echo "  LINUX PC TAIYAR HAI"
           echo "=============================================="
           if [ -n "$TS_IP" ]; then
-            echo "  == RDP (sabse best) =="
-            echo "  ADDRESS : $TS_IP:3389"
-            echo "  USER    : runner"
-            echo "  PASS    : $RDPPW"
-            echo "  -----------------------"
-            echo "  == VNC (koi bhi VNC app) =="
-            echo "  ADDRESS : $TS_IP:5900"
-            echo "  PASS    : koi nahi (blank)"
+            echo "  == WINDOWS APP ME YE DALO =="
+            echo "  PC name : $TS_IP"
+            echo "  User    : runner"
+            echo "  Pass    : kuch bhi / khali chhod do"
+            echo "  (password pooche to: $RDPPW)"
           else
             echo "  Tailscale nahi chala - sirf browser link chalega"
             if [ -n "$TS_LOGIN" ]; then echo "  LOGIN   : $TS_LOGIN"; fi
@@ -389,13 +384,13 @@ jobs:
           if [ "$BO" = "0" ]; then
             sudo mkdir -p /dev/binderfs
             sudo mount -t binder binder /dev/binderfs 2>/dev/null
-            for d in binder hwbinder vndbinder;  do sudo ln -sf /dev/binderfs/$d /dev/$d 2>/dev/null; done
+            for d in binder hwbinder vndbinder; do sudo ln -sf /dev/binderfs/$d /dev/$d 2>/dev/null; done
             if [ -e /dev/binderfs/binder ]; then BO=1; fi
           fi
           if [ "$BO" = "1" ]; then echo "[OK] binder ready"; else echo "[FAIL] binder nahi mila"; fi
           echo "BINDER_OK=$BO" >> $GITHUB_ENV
           sudo apt-get install -y adb scrcpy android-tools-adb 2>&1 | tail -2
-          sudo apt-get install -y xvfb x11vnc novnc websockify xfwm4 curl 2>&1 | tail -2
+          sudo apt-get install -y xvfb x11vnc novnc websockify xrdp curl 2>&1 | tail -2
           sudo apt-get install -y -f 2>&1 | tail -1
           for b in adb scrcpy Xvfb x11vnc websockify docker; do
             if command -v $b > /dev/null 2>&1; then echo "[OK] $b"; else echo "[WARN] $b nahi mila"; fi
@@ -512,65 +507,69 @@ jobs:
           else
             echo "[WARN] Android screen nahi chala"
           fi
-          echo "---------------- Tailscale ----------------"
+          sudo sed -i '/^\[Xorg\]/,$d' /etc/xrdp/xrdp.ini
+          printf '%s\n' '[cloudpc]' 'name=CloudPC' 'lib=libvnc.so' 'username=na' 'password=na' 'ip=127.0.0.1' 'port=5900' | sudo tee -a /etc/xrdp/xrdp.ini > /dev/null
+          sudo service xrdp restart 2>/dev/null || sudo /usr/sbin/xrdp 2>/dev/null || true
+          sleep 3
+          pgrep -x xrdp > /dev/null && echo "[OK] RDP :3389" || echo "[FAIL] xrdp"
+                  echo "---------------- Tailscale ----------------"
           T=/tmp/ts; mkdir -p $T; rm -f $T/tailscale $T/tailscaled
           timeout 240 curl -fsSL --max-time 200 https://pkgs.tailscale.com/stable/tailscale_latest_amd64.tgz -o /tmp/ts.tgz
           tar -xzf /tmp/ts.tgz -C $T --strip-components=1 2>/dev/null
           TS=$T/tailscale; TSD=$T/tailscaled
           if [ ! -x "$TSD" ]; then
-            echo "[WARN] static download fail - install.sh try"
             timeout 180 curl -fsSL --max-time 150 https://tailscale.com/install.sh | sh > /tmp/tsi.log 2>&1
             TS=$(command -v tailscale); TSD=$(command -v tailscaled)
           fi
-          if [ -z "$TSD" ]; then echo "[FAIL] tailscale binary nahi mila"; fi
-          echo "[OK] binary = $TSD"
+          echo "[OK] tailscale binary = $TSD"
           K='${{ secrets.TAILSCALE_AUTH_KEY }}'
-          HN="android-$GITHUB_RUN_ID"
+          HN="cloudpc-android"
           IP=""
-          ts_up() {
-            pkill -x tailscaled 2>/dev/null
-            sudo pkill -x tailscaled 2>/dev/null
-            rm -f /tmp/ts.sock /tmp/ts.state
-            sleep 1
-            if [ "$1" = "kern" ] && [ -c /dev/net/tun ]; then
-              SU="sudo"; EX=""
-            else
-              SU=""; EX="--tun=userspace-networking"
-            fi
-            $SU nohup $TSD $EX --state=/tmp/ts.state --socket=/tmp/ts.sock > /tmp/tsd.log 2>&1 &
-            sleep 7
-            if ! pgrep -x tailscaled > /dev/null; then echo "[WARN] $1: daemon nahi chala"; return 1; fi
-            if ! timeout 25 $SU $TS --socket=/tmp/ts.sock status > /dev/null 2>&1; then echo "[WARN] $1: socket connect fail"; return 1; fi
+          ts_try() {
+            pkill -x tailscaled 2>/dev/null; sudo pkill -x tailscaled 2>/dev/null
+            rm -f /tmp/ts.sock /tmp/ts.state; sleep 1
+            case "$1" in
+              systemd) sudo systemctl start tailscaled 2>/dev/null; SU="sudo"; SOCK="";;
+              kern)    [ -c /dev/net/tun ] || { echo "[WARN] kern: /dev/net/tun nahi hai"; return 1; }
+                       sudo nohup $TSD --state=/tmp/ts.state --socket=/tmp/ts.sock > /tmp/tsd.log 2>&1 &
+                       SU="sudo"; SOCK="--socket=/tmp/ts.sock";;
+              user)    nohup $TSD --tun=userspace-networking --state=/tmp/ts.state --socket=/tmp/ts.sock > /tmp/tsd.log 2>&1 &
+                       SU=""; SOCK="--socket=/tmp/ts.sock";;
+            esac
+            sleep 8
+            if ! pgrep -x tailscaled > /dev/null; then echo "[WARN] $1: daemon nahi chala"; tail -4 /tmp/tsd.log 2>/dev/null; return 1; fi
+            if ! timeout 25 $SU $TS $SOCK status > /dev/null 2>&1; then echo "[WARN] $1: socket connect fail"; return 1; fi
             echo "[OK] tailscaled chala (mode $1)"
-            if ! echo "$K" | grep -q '^tskey-auth-'; then return 0; fi
-            timeout 70 $SU $TS --socket=/tmp/ts.sock up --reset --timeout=60s --authkey="$K" --hostname="$HN" --accept-routes > /tmp/tsup.log 2>&1
+            if ! echo "$K" | grep -q '^tskey-auth-'; then echo "[WARN] TAILSCALE_AUTH_KEY galat hai ya khali hai"; return 0; fi
+            timeout 80 $SU $TS $SOCK up --reset --timeout=70s --authkey="$K" --hostname="$HN" --accept-routes > /tmp/tsup.log 2>&1
+            echo "--- tailscale up bola: ---"; tail -4 /tmp/tsup.log 2>/dev/null
             for i in $(seq 1 12); do
-              IP=$(timeout 15 $SU $TS --socket=/tmp/ts.sock ip -4 2>/dev/null | grep '^100\.' | head -1)
+              IP=$(timeout 15 $SU $TS $SOCK ip -4 2>/dev/null | grep '^100\.' | head -1)
               if [ -n "$IP" ]; then break; fi
               sleep 5
             done
-            if [ -n "$IP" ]; then echo "[OK] Tailscale IP = $IP"; return 0; fi
+            if [ -n "$IP" ]; then echo "[OK] TAILSCALE IP = $IP"; return 0; fi
             echo "[WARN] $1: IP nahi mila"; tail -6 /tmp/tsd.log 2>/dev/null; return 1
           }
           if [ -n "$TSD" ]; then
-            ts_up kern || { echo "[..] kernel mode fail - userspace mode try"; ts_up user || echo "[FAIL] Tailscale nahi chala"; }
+            for m in systemd kern user; do if ts_try $m; then break; fi; done
           fi
           if [ -n "$IP" ]; then
             echo "TS_IP=$IP" >> $GITHUB_ENV
           elif [ -n "$TSD" ]; then
             if echo "$K" | grep -q '^tskey-auth-'; then
-              echo "[WARN] Tailscale IP nahi mila - browser link use karo"
+              echo "[FAIL] Tailscale nahi chala. Niche wala error mujhe bhej do:"
               tail -12 /tmp/tsd.log 2>/dev/null
-              tail -5 /tmp/tsup.log 2>/dev/null
+              tail -8 /tmp/tsup.log 2>/dev/null
             else
-              ( timeout 40 $SU $TS --socket=/tmp/ts.sock up --reset --hostname="$HN" --timeout=25s > /tmp/tsup.log 2>&1 & )
+              ( timeout 40 $SU $TS $SOCK up --reset --hostname="$HN" --timeout=25s > /tmp/tsup.log 2>&1 & )
               AU=""
               for i in $(seq 1 8); do
                 sleep 4
-                AU=$(timeout 15 $SU $TS --socket=/tmp/ts.sock status --json 2>/dev/null | grep -o '"AuthURL" *: *"[^"]*"' | head -1 | sed 's/.*: *"//;s/"$//')
+                AU=$(timeout 15 $SU $TS $SOCK status --json 2>/dev/null | grep -o '"AuthURL" *: *"[^"]*"' | head -1 | sed 's/.*: *"//;s/"$//')
                 if [ -n "$AU" ]; then break; fi
               done
-              if [ -n "$AU" ]; then echo "TS_LOGIN=$AU" >> $GITHUB_ENV; echo "[OK] LOGIN LINK: $AU"; else echo "[WARN] login link nahi mila - TAILSCALE_AUTH_KEY daalo"; fi
+              if [ -n "$AU" ]; then echo "TS_LOGIN=$AU" >> $GITHUB_ENV; echo "[OK] LOGIN LINK: $AU"; else echo "[WARN] login link nahi mila"; fi
             fi
           fi
 
@@ -604,18 +603,16 @@ jobs:
           timeout 20 adb -s localhost:5555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' | grep -q '^1$'; chk $? "Android booted"
           timeout 10 bash -c 'echo > /dev/tcp/127.0.0.1/5555' 2>/dev/null; chk $? "ADB port 5555"
           timeout 10 bash -c 'echo > /dev/tcp/127.0.0.1/5900' 2>/dev/null; chk $? "VNC port open"
+          timeout 10 bash -c 'echo > /dev/tcp/127.0.0.1/3389' 2>/dev/null; chk $? "RDP port 3389"
           echo "=============================================="
           echo "  ANDROID TAIYAR HAI"
           echo "=============================================="
           echo "  Screen : ${AW}x${AH} dpi ${ADPI}"
           if [ -n "$TS_IP" ]; then
-            echo "  == BEST: PC/laptop se scrcpy =="
-            echo "  scrcpy --tcpip=$TS_IP:5555"
-            echo "  -------------------------------"
-            echo "  == PHONE: koi bhi VNC app =="
-            echo "  ADDRESS : $TS_IP"
-            echo "  PORT    : 5900"
-            echo "  PASS    : koi nahi (blank)"
+            echo "  == WINDOWS APP ME YE DALO =="
+            echo "  PC name : $TS_IP"
+            echo "  User    : runner"
+            echo "  Pass    : kuch bhi / khali chhod do"
           else
             echo "  Tailscale nahi chala - sirf browser link chalega"
             if [ -n "$TS_LOGIN" ]; then echo "  LOGIN   : $TS_LOGIN"; fi
@@ -626,6 +623,7 @@ jobs:
           fi
           echo "  TIME    : ${{ inputs.hours }} ghante"
           echo "=============================================="
+
       - name: '7 Keep alive'
         shell: bash
         run: |
@@ -641,8 +639,7 @@ jobs:
             pgrep -x scrcpy > /dev/null || echo "[warn] scrcpy dead"
           done
           echo "TIME OVER"
-
-  # ================= WINDOWS 11 =================
+            # ================= WINDOWS 11 =================
   windows:
     if: inputs.os == 'windows11'
     runs-on: windows-latest
@@ -674,7 +671,7 @@ jobs:
           $k = '${{ secrets.TAILSCALE_AUTH_KEY }}'
           if ($k -like 'tskey-auth-*') {
             $o = "$env:TEMP\ts_out.txt"; $e = "$env:TEMP\ts_err.txt"
-            $a = @('up','--reset',"--authkey=$k","--hostname=winpc-$env:GITHUB_RUN_ID",'--accept-routes','--timeout=60s')
+            $a = @('up','--reset',"--authkey=$k",'--hostname=cloudpc-win','--accept-routes','--timeout=60s')
             Start-Process -FilePath $ts -ArgumentList $a -RedirectStandardOutput $o -RedirectStandardError $e -NoNewWindow -Wait
             Get-Content $o, $e -ErrorAction SilentlyContinue | Select-Object -Last 4
             $ip = ''
@@ -743,13 +740,13 @@ jobs:
       - name: '5 Health check'
         shell: pwsh
         run: |
-         Write-Output "=============================================="
+          Write-Output "=============================================="
           Write-Output "  WINDOWS 11 PC TAIYAR HAI"
           Write-Output "=============================================="
-          if ($env:TS_IP) { Write-Output "  == RDP (sabse best) =="; Write-Output "  ADDRESS : $env:TS_IP:3389" }
+          if ($env:TS_IP) { Write-Output "  == WINDOWS APP ME YE DALO =="; Write-Output "  PC name : $env:TS_IP" }
           else { Write-Output "  Tailscale nahi chala - browser link use karo" }
-          Write-Output "  USER    : RDP"
-          Write-Output "  PASS    : $env:RDPPW"
+          Write-Output "  User    : RDP"
+          Write-Output "  Pass    : $env:RDPPW"
           if ($env:CF_LINK) { Write-Output "  == BROWSER (backup) =="; Write-Output "  $env:CF_LINK/vnc.html?autoconnect=true&resize=scale" }
           Write-Output "  TIME    : ${{ inputs.hours }} ghante"
           Write-Output "=============================================="
@@ -769,3 +766,4 @@ jobs:
             Write-Output "[alive] bache $([math]::Round($left.TotalMinutes)) min | $(Get-Date -Format 'HH:mm:ss')"
           }
           Write-Output "TIME OVER"
+          

@@ -230,44 +230,55 @@ jobs:
           K='${{ secrets.TAILSCALE_AUTH_KEY }}'
           HN="cloudpc-linux"
           IP=""
-          ts_try() {
+                    ts_try() {
+            D="/tmp/ts-$1"
+            sudo rm -rf "$D" 2>/dev/null; rm -rf "$D" 2>/dev/null
+            mkdir -p "$D" 2>/dev/null
             pkill -x tailscaled 2>/dev/null; sudo pkill -x tailscaled 2>/dev/null
-            rm -f /tmp/ts.sock /tmp/ts.state; sleep 1
+            sleep 2
             case "$1" in
               systemd) sudo systemctl start tailscaled 2>/dev/null; SU="sudo"; SOCK="";;
               kern)    [ -c /dev/net/tun ] || { echo "[WARN] kern: /dev/net/tun nahi hai"; return 1; }
-                       sudo nohup $TSD --state=/tmp/ts.state --socket=/tmp/ts.sock > /tmp/tsd.log 2>&1 &
-                       SU="sudo"; SOCK="--socket=/tmp/ts.sock";;
-              user)    nohup $TSD --tun=userspace-networking --state=/tmp/ts.state --socket=/tmp/ts.sock > /tmp/tsd.log 2>&1 &
-                       SU=""; SOCK="--socket=/tmp/ts.sock";;
+                       sudo nohup $TSD --state=$D/ts.state --socket=$D/ts.sock > $D/tsd.log 2>&1 < /dev/null &
+                       SU="sudo"; SOCK="--socket=$D/ts.sock";;
+              user)    nohup $TSD --tun=userspace-networking --state=$D/ts.state --socket=$D/ts.sock > $D/tsd.log 2>&1 < /dev/null &
+                       SU=""; SOCK="--socket=$D/ts.sock";;
             esac
-            sleep 8
-            if ! pgrep -x tailscaled > /dev/null; then echo "[WARN] $1: daemon nahi chala"; tail -4 /tmp/tsd.log 2>/dev/null; return 1; fi
-            if ! timeout 25 $SU $TS $SOCK status > /dev/null 2>&1; then echo "[WARN] $1: socket connect fail"; return 1; fi
+            sleep 10
+            if ! pgrep -x tailscaled > /dev/null; then echo "[WARN] $1: daemon nahi chala"; tail -5 $D/tsd.log 2>/dev/null; return 1; fi
+            OK=0
+            for i in 1 2 3 4 5; do
+              if timeout 20 $SU $TS $SOCK status --json > $D/st.json 2>$D/st.err; then OK=1; break; fi
+              sleep 4
+            done
+            if [ "$OK" != "1" ]; then
+              echo "[WARN] $1: daemon se baat nahi hui"
+              tail -3 $D/st.err 2>/dev/null; tail -6 $D/tsd.log 2>/dev/null; return 1
+            fi
             echo "[OK] tailscaled chala (mode $1)"
             if ! echo "$K" | grep -q '^tskey-auth-'; then echo "[WARN] TAILSCALE_AUTH_KEY galat hai ya khali hai"; return 0; fi
-            timeout 80 $SU $TS $SOCK up --reset --timeout=70s --authkey="$K" --hostname="$HN" --accept-routes > /tmp/tsup.log 2>&1
-            echo "--- tailscale up bola: ---"; tail -4 /tmp/tsup.log 2>/dev/null
+            timeout 90 $SU $TS $SOCK up --reset --timeout=75s --authkey="$K" --hostname="$HN" --accept-routes > $D/tsup.log 2>&1
+            echo "--- tailscale up bola: ---"; tail -4 $D/tsup.log 2>/dev/null
             for i in $(seq 1 12); do
               IP=$(timeout 15 $SU $TS $SOCK ip -4 2>/dev/null | grep '^100\.' | head -1)
               if [ -n "$IP" ]; then break; fi
               sleep 5
             done
             if [ -n "$IP" ]; then echo "[OK] TAILSCALE IP = $IP"; return 0; fi
-            echo "[WARN] $1: IP nahi mila"; tail -6 /tmp/tsd.log 2>/dev/null; return 1
+            echo "[WARN] $1: IP nahi mila"; tail -8 $D/tsup.log 2>/dev/null; tail -6 $D/tsd.log 2>/dev/null; return 1
           }
           if [ -n "$TSD" ]; then
-            for m in systemd kern user; do if ts_try $m; then break; fi; done
+            for m in kern user systemd; do if ts_try $m; then break; fi; done
           fi
           if [ -n "$IP" ]; then
             echo "TS_IP=$IP" >> $GITHUB_ENV
           elif [ -n "$TSD" ]; then
             if echo "$K" | grep -q '^tskey-auth-'; then
               echo "[FAIL] Tailscale nahi chala. Niche wala error mujhe bhej do:"
-              tail -12 /tmp/tsd.log 2>/dev/null
-              tail -8 /tmp/tsup.log 2>/dev/null
+              tail -12 $D/tsd.log 2>/dev/null
+              tail -8 $D/tsup.log 2>/dev/null
             else
-              ( timeout 40 $SU $TS $SOCK up --reset --hostname="$HN" --timeout=25s > /tmp/tsup.log 2>&1 & )
+              ( timeout 40 $SU $TS $SOCK up --reset --hostname="$HN" --timeout=25s > $D/tsup.log 2>&1 & )
               AU=""
               for i in $(seq 1 8); do
                 sleep 4
@@ -277,8 +288,6 @@ jobs:
               if [ -n "$AU" ]; then echo "TS_LOGIN=$AU" >> $GITHUB_ENV; echo "[OK] LOGIN LINK: $AU"; else echo "[WARN] login link nahi mila"; fi
             fi
           fi
-
-          if [ "$WEB" = "yes" ]; then
             echo "---------------- Browser link ----------------"
             timeout 150 curl -sL --max-time 120 -o /tmp/cf https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
             chmod +x /tmp/cf
@@ -525,44 +534,55 @@ jobs:
           K='${{ secrets.TAILSCALE_AUTH_KEY }}'
           HN="cloudpc-android"
           IP=""
-          ts_try() {
+                    ts_try() {
+            D="/tmp/ts-$1"
+            sudo rm -rf "$D" 2>/dev/null; rm -rf "$D" 2>/dev/null
+            mkdir -p "$D" 2>/dev/null
             pkill -x tailscaled 2>/dev/null; sudo pkill -x tailscaled 2>/dev/null
-            rm -f /tmp/ts.sock /tmp/ts.state; sleep 1
+            sleep 2
             case "$1" in
               systemd) sudo systemctl start tailscaled 2>/dev/null; SU="sudo"; SOCK="";;
               kern)    [ -c /dev/net/tun ] || { echo "[WARN] kern: /dev/net/tun nahi hai"; return 1; }
-                       sudo nohup $TSD --state=/tmp/ts.state --socket=/tmp/ts.sock > /tmp/tsd.log 2>&1 &
-                       SU="sudo"; SOCK="--socket=/tmp/ts.sock";;
-              user)    nohup $TSD --tun=userspace-networking --state=/tmp/ts.state --socket=/tmp/ts.sock > /tmp/tsd.log 2>&1 &
-                       SU=""; SOCK="--socket=/tmp/ts.sock";;
+                       sudo nohup $TSD --state=$D/ts.state --socket=$D/ts.sock > $D/tsd.log 2>&1 < /dev/null &
+                       SU="sudo"; SOCK="--socket=$D/ts.sock";;
+              user)    nohup $TSD --tun=userspace-networking --state=$D/ts.state --socket=$D/ts.sock > $D/tsd.log 2>&1 < /dev/null &
+                       SU=""; SOCK="--socket=$D/ts.sock";;
             esac
-            sleep 8
-            if ! pgrep -x tailscaled > /dev/null; then echo "[WARN] $1: daemon nahi chala"; tail -4 /tmp/tsd.log 2>/dev/null; return 1; fi
-            if ! timeout 25 $SU $TS $SOCK status > /dev/null 2>&1; then echo "[WARN] $1: socket connect fail"; return 1; fi
+            sleep 10
+            if ! pgrep -x tailscaled > /dev/null; then echo "[WARN] $1: daemon nahi chala"; tail -5 $D/tsd.log 2>/dev/null; return 1; fi
+            OK=0
+            for i in 1 2 3 4 5; do
+              if timeout 20 $SU $TS $SOCK status --json > $D/st.json 2>$D/st.err; then OK=1; break; fi
+              sleep 4
+            done
+            if [ "$OK" != "1" ]; then
+              echo "[WARN] $1: daemon se baat nahi hui"
+              tail -3 $D/st.err 2>/dev/null; tail -6 $D/tsd.log 2>/dev/null; return 1
+            fi
             echo "[OK] tailscaled chala (mode $1)"
             if ! echo "$K" | grep -q '^tskey-auth-'; then echo "[WARN] TAILSCALE_AUTH_KEY galat hai ya khali hai"; return 0; fi
-            timeout 80 $SU $TS $SOCK up --reset --timeout=70s --authkey="$K" --hostname="$HN" --accept-routes > /tmp/tsup.log 2>&1
-            echo "--- tailscale up bola: ---"; tail -4 /tmp/tsup.log 2>/dev/null
+            timeout 90 $SU $TS $SOCK up --reset --timeout=75s --authkey="$K" --hostname="$HN" --accept-routes > $D/tsup.log 2>&1
+            echo "--- tailscale up bola: ---"; tail -4 $D/tsup.log 2>/dev/null
             for i in $(seq 1 12); do
               IP=$(timeout 15 $SU $TS $SOCK ip -4 2>/dev/null | grep '^100\.' | head -1)
               if [ -n "$IP" ]; then break; fi
               sleep 5
             done
             if [ -n "$IP" ]; then echo "[OK] TAILSCALE IP = $IP"; return 0; fi
-            echo "[WARN] $1: IP nahi mila"; tail -6 /tmp/tsd.log 2>/dev/null; return 1
+            echo "[WARN] $1: IP nahi mila"; tail -8 $D/tsup.log 2>/dev/null; tail -6 $D/tsd.log 2>/dev/null; return 1
           }
           if [ -n "$TSD" ]; then
-            for m in systemd kern user; do if ts_try $m; then break; fi; done
+            for m in kern user systemd; do if ts_try $m; then break; fi; done
           fi
           if [ -n "$IP" ]; then
             echo "TS_IP=$IP" >> $GITHUB_ENV
           elif [ -n "$TSD" ]; then
             if echo "$K" | grep -q '^tskey-auth-'; then
               echo "[FAIL] Tailscale nahi chala. Niche wala error mujhe bhej do:"
-              tail -12 /tmp/tsd.log 2>/dev/null
-              tail -8 /tmp/tsup.log 2>/dev/null
+              tail -12 $D/tsd.log 2>/dev/null
+              tail -8 $D/tsup.log 2>/dev/null
             else
-              ( timeout 40 $SU $TS $SOCK up --reset --hostname="$HN" --timeout=25s > /tmp/tsup.log 2>&1 & )
+              ( timeout 40 $SU $TS $SOCK up --reset --hostname="$HN" --timeout=25s > $D/tsup.log 2>&1 & )
               AU=""
               for i in $(seq 1 8); do
                 sleep 4
@@ -572,8 +592,6 @@ jobs:
               if [ -n "$AU" ]; then echo "TS_LOGIN=$AU" >> $GITHUB_ENV; echo "[OK] LOGIN LINK: $AU"; else echo "[WARN] login link nahi mila"; fi
             fi
           fi
-
-          if [ "$WEB" = "yes" ]; then
             echo "---------------- Browser link ----------------"
             timeout 150 curl -sL --max-time 120 -o /tmp/cf https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
             chmod +x /tmp/cf

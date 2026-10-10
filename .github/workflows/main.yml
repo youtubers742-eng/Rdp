@@ -182,7 +182,7 @@ jobs:
           echo "RDPPW=$PW" >> $GITHUB_ENV
           echo "[OK] user runner ka password set"
           sudo sed -i '/^\[Xorg\]/,$d' /etc/xrdp/xrdp.ini
-          printf '%s\n' '[cloudpc]' 'name=CloudPC' 'lib=libvnc.so' 'username=na' 'password=na' 'ip=127.0.0.1' 'port=5900' | sudo tee -a /etc/xrdp/xrdp.ini > /dev/null
+          printf '%s\n' '[cloudpc]' 'name=CloudPC' 'lib=libvnc.so' 'username=na' "password=$PW" 'ip=127.0.0.1' 'port=5900' | sudo tee -a /etc/xrdp/xrdp.ini > /dev/null
           sudo service xrdp restart 2>/dev/null || sudo /usr/sbin/xrdp 2>/dev/null || true
           sleep 3
           rm -rf /tmp/.X99-lock
@@ -197,9 +197,11 @@ jobs:
           fi
           nohup startxfce4 > /tmp/xfce.log 2>&1 &
           sleep 12
-          nohup x11vnc -display :99 -forever -shared -nopw -rfbport 5900 -quiet > /tmp/x11vnc.log 2>&1 &
+          x11vnc -storepasswd "$PW" /tmp/vncpass 2>/dev/null
+          nohup x11vnc -display :99 -forever -shared -rfbauth /tmp/vncpass -rfbport 5900 -quiet > /tmp/x11vnc.log 2>&1 &
+          nohup x11vnc -display :99 -forever -shared -nopw -rfbport 5901 -quiet > /tmp/x11vnc2.log 2>&1 &
           sleep 3
-          nohup websockify --web=/usr/share/novnc 6080 localhost:5900 > /tmp/novnc.log 2>&1 &
+          nohup websockify --web=/usr/share/novnc 6080 localhost:5901 > /tmp/novnc.log 2>&1 &
           sleep 3
           pgrep -x Xvfb > /dev/null && echo "[OK] Xvfb" || echo "[FAIL] Xvfb"
           pgrep -x x11vnc > /dev/null && echo "[OK] VNC :5900" || echo "[FAIL] x11vnc"
@@ -230,7 +232,7 @@ jobs:
           K='${{ secrets.TAILSCALE_AUTH_KEY }}'
           HN="cloudpc-linux"
           IP=""
-                    ts_try() {
+          ts_try() {
             D="/tmp/ts-$1"
             sudo rm -rf "$D" 2>/dev/null; rm -rf "$D" 2>/dev/null
             mkdir -p "$D" 2>/dev/null
@@ -288,6 +290,8 @@ jobs:
               if [ -n "$AU" ]; then echo "TS_LOGIN=$AU" >> $GITHUB_ENV; echo "[OK] LOGIN LINK: $AU"; else echo "[WARN] login link nahi mila"; fi
             fi
           fi
+
+          if [ "$WEB" = "yes" ]; then
             echo "---------------- Browser link ----------------"
             timeout 150 curl -sL --max-time 120 -o /tmp/cf https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
             chmod +x /tmp/cf
@@ -325,8 +329,7 @@ jobs:
             echo "  == WINDOWS APP ME YE DALO =="
             echo "  PC name : $TS_IP"
             echo "  User    : runner"
-            echo "  Pass    : kuch bhi / khali chhod do"
-            echo "  (password pooche to: $RDPPW)"
+            echo "  Pass    : $RDPPW"
           else
             echo "  Tailscale nahi chala - sirf browser link chalega"
             if [ -n "$TS_LOGIN" ]; then echo "  LOGIN   : $TS_LOGIN"; fi
@@ -505,9 +508,13 @@ jobs:
             elif try -m 1200; then SC=1; echo "[OK] scrcpy chala (max size)"
             elif try; then SC=1; echo "[OK] scrcpy chala (default)"
             else echo "[FAIL] scrcpy nahi chala"; tail -6 /tmp/scrcpy.log; fi
-            nohup x11vnc -display :99 -forever -shared -nopw -rfbport 5900 -quiet > /tmp/x11vnc.log 2>&1 &
+            PW=$(head -c 12 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 12)
+            echo "RDPPW=$PW" >> $GITHUB_ENV
+            x11vnc -storepasswd "$PW" /tmp/vncpass 2>/dev/null
+            nohup x11vnc -display :99 -forever -shared -rfbauth /tmp/vncpass -rfbport 5900 -quiet > /tmp/x11vnc.log 2>&1 &
+            nohup x11vnc -display :99 -forever -shared -nopw -rfbport 5901 -quiet > /tmp/x11vnc2.log 2>&1 &
             sleep 3
-            nohup websockify --web=/usr/share/novnc 6080 localhost:5900 > /tmp/novnc.log 2>&1 &
+            nohup websockify --web=/usr/share/novnc 6080 localhost:5901 > /tmp/novnc.log 2>&1 &
             sleep 3
             pgrep -x Xvfb > /dev/null && echo "[OK] Xvfb" || echo "[FAIL] Xvfb"
             pgrep -x scrcpy > /dev/null && echo "[OK] scrcpy" || echo "[FAIL] scrcpy"
@@ -517,11 +524,11 @@ jobs:
             echo "[WARN] Android screen nahi chala"
           fi
           sudo sed -i '/^\[Xorg\]/,$d' /etc/xrdp/xrdp.ini
-          printf '%s\n' '[cloudpc]' 'name=CloudPC' 'lib=libvnc.so' 'username=na' 'password=na' 'ip=127.0.0.1' 'port=5900' | sudo tee -a /etc/xrdp/xrdp.ini > /dev/null
+          printf '%s\n' '[cloudpc]' 'name=CloudPC' 'lib=libvnc.so' 'username=na' "password=$PW" 'ip=127.0.0.1' 'port=5900' | sudo tee -a /etc/xrdp/xrdp.ini > /dev/null
           sudo service xrdp restart 2>/dev/null || sudo /usr/sbin/xrdp 2>/dev/null || true
           sleep 3
           pgrep -x xrdp > /dev/null && echo "[OK] RDP :3389" || echo "[FAIL] xrdp"
-                  echo "---------------- Tailscale ----------------"
+          echo "---------------- Tailscale ----------------"
           T=/tmp/ts; mkdir -p $T; rm -f $T/tailscale $T/tailscaled
           timeout 240 curl -fsSL --max-time 200 https://pkgs.tailscale.com/stable/tailscale_latest_amd64.tgz -o /tmp/ts.tgz
           tar -xzf /tmp/ts.tgz -C $T --strip-components=1 2>/dev/null
@@ -534,7 +541,7 @@ jobs:
           K='${{ secrets.TAILSCALE_AUTH_KEY }}'
           HN="cloudpc-android"
           IP=""
-                    ts_try() {
+          ts_try() {
             D="/tmp/ts-$1"
             sudo rm -rf "$D" 2>/dev/null; rm -rf "$D" 2>/dev/null
             mkdir -p "$D" 2>/dev/null
@@ -592,6 +599,8 @@ jobs:
               if [ -n "$AU" ]; then echo "TS_LOGIN=$AU" >> $GITHUB_ENV; echo "[OK] LOGIN LINK: $AU"; else echo "[WARN] login link nahi mila"; fi
             fi
           fi
+
+          if [ "$WEB" = "yes" ]; then
             echo "---------------- Browser link ----------------"
             timeout 150 curl -sL --max-time 120 -o /tmp/cf https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
             chmod +x /tmp/cf
@@ -630,7 +639,7 @@ jobs:
             echo "  == WINDOWS APP ME YE DALO =="
             echo "  PC name : $TS_IP"
             echo "  User    : runner"
-            echo "  Pass    : kuch bhi / khali chhod do"
+            echo "  Pass    : $RDPPW"
           else
             echo "  Tailscale nahi chala - sirf browser link chalega"
             if [ -n "$TS_LOGIN" ]; then echo "  LOGIN   : $TS_LOGIN"; fi
@@ -784,4 +793,3 @@ jobs:
             Write-Output "[alive] bache $([math]::Round($left.TotalMinutes)) min | $(Get-Date -Format 'HH:mm:ss')"
           }
           Write-Output "TIME OVER"
-          

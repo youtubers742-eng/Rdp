@@ -1,0 +1,242 @@
+name: Cloud PC Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: 'Kitne ghante (1-5)'
+        required: true
+        default: '5'
+        type: choice
+        options: ['1', '2', '3', '4', '5']
+      apps:
+        description: 'App pack (Chrome, VS Code, VLC, Discord, qBittorrent, PowerToys...)'
+        required: true
+        default: 'yes'
+        type: choice
+        options: ['yes', 'no']
+      gaming:
+        description: 'Steam + Epic + cloud gaming shortcuts'
+        required: true
+        default: 'yes'
+        type: choice
+        options: ['yes', 'no']
+      stream:
+        description: 'Sunshine = Moonlight se 60fps smooth streaming'
+        required: true
+        default: 'yes'
+        type: choice
+        options: ['yes', 'no']
+      web:
+        description: 'Browser backup link (kisi ko dikhane ke liye)'
+        required: true
+        default: 'yes'
+        type: choice
+        options: ['yes', 'no']
+      dl:
+        description: 'Optional: koi file direct download karni ho to URL'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  pc:
+    runs-on: windows-latest
+    steps:
+
+      - name: '1 User, RDP aur tweaks'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $p = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 14 | ForEach-Object { [char]$_ })
+          net user RDP "$p" /add /y
+          net localgroup administrators RDP /add
+          net localgroup "Remote Desktop Users" RDP /add
+          Add-Content -Path $env:GITHUB_ENV -Value "RDPPW=$p"
+          Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0
+          Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name UserAuthentication -Value 0
+          Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name MaxMonitors -Value 4
+          Enable-NetFirewallRule -DisplayGroup 'Remote Desktop' 2>$null
+          netsh advfirewall firewall add rule name='RDP3389' dir=in action=allow protocol=TCP localport=3389 | Out-Null
+          Restart-Service TermService -Force -ErrorAction SilentlyContinue
+          Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name AppsUseLightTheme -Value 0
+          Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name SystemUsesLightTheme -Value 0
+          Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name HideFileExt -Value 0
+          New-Item 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization' -Force | Out-Null
+          Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization' -Name NoLockScreen -Value 1
+          powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+          powercfg /change monitor-timeout-ac 0
+          powercfg /change standby-timeout-ac 0
+          Stop-Service wuauserv -Force -ErrorAction SilentlyContinue
+          Set-Service wuauserv -StartupType Disabled -ErrorAction SilentlyContinue
+          Write-Output "[OK] user RDP ban gaya + RDP on + tweaks done"
+
+      - name: '2 Tailscale'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $msi = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest -Uri 'https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi' -OutFile $msi -UseBasicParsing -TimeoutSec 180
+          Start-Process msiexec.exe -ArgumentList '/i', $msi, '/quiet', '/norestart' -Wait
+          Start-Sleep -Seconds 6
+          $ts = 'C:\Program Files\Tailscale\tailscale.exe'
+          $k = '${{ secrets.TAILSCALE_AUTH_KEY }}'
+          if ($k -like 'tskey-auth-*') {
+            & $ts up --reset --authkey=$k --hostname=cloudpc-win --accept-routes --timeout=60s 2>&1 | Select-Object -Last 4
+            $ip = ''
+            for ($i = 0; $i -lt 12; $i++) {
+              $ip = (& $ts ip -4 2>$null | Select-Object -First 1)
+              if ($ip) { break }
+              Start-Sleep -Seconds 10
+            }
+            if ($ip) {
+              Add-Content -Path $env:GITHUB_ENV -Value "TS_IP=$ip"
+              Write-Output "[OK] Tailscale IP = $ip"
+            } else {
+              Write-Output "[WARN] Tailscale IP nahi mila"
+              & $ts status 2>$null
+            }
+          } else {
+            Write-Output "[WARN] TAILSCALE_AUTH_KEY nahi hai ya galat hai"
+          }
+
+      - name: '3 Apps + download'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          if ('${{ inputs.apps }}' -eq 'yes') {
+            $apps = @('Google.Chrome','7zip.7zip','Microsoft.VisualStudioCode','VideoLAN.VLC','Discord.Discord','qBittorrent.qBittorrent','Microsoft.PowerToys','voidtools.Everything','Mozilla.Firefox','Notepad++.Notepad++','Git.Git','Python.Python.3.12','Telegram.TelegramDesktop')
+            foreach ($a in $apps) {
+              try {
+                winget install --exact --id $a --disable-interactivity --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
+                Write-Output "[OK] $a"
+              } catch { Write-Output "[WARN] $a fail" }
+            }
+          }
+          $u = '${{ inputs.dl }}'
+          if ($u) {
+            try {
+              Invoke-WebRequest -Uri $u -OutFile "$env:USERPROFILE\Desktop\$(Split-Path $u -Leaf)" -UseBasicParsing -TimeoutSec 1800
+              Write-Output "[OK] file download ho gayi -> Desktop"
+            } catch { Write-Output "[WARN] download fail: $u" }
+          }
+
+      - name: '4 Gaming'
+        if: inputs.gaming == 'yes'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          foreach ($a in @('Valve.Steam','EpicGames.EpicGamesLauncher')) {
+            try {
+              winget install --exact --id $a --disable-interactivity --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
+              Write-Output "[OK] $a"
+            } catch { Write-Output "[WARN] $a fail" }
+          }
+          $w = New-Object -ComObject WScript.Shell
+          $links = @{ 'GeForce NOW' = 'https://play.geforcenow.com'; 'Xbox Cloud' = 'https://www.xbox.com/play'; 'Boosteroid' = 'https://boosteroid.com' }
+          foreach ($k in $links.Keys) {
+            $s = $w.CreateShortcut("$env:PUBLIC\Desktop\$k.url")
+            $s.TargetPath = $links[$k]
+            $s.Save()
+            Write-Output "[OK] shortcut $k"
+          }
+          Write-Output "[OK] gaming setup done"
+
+      - name: '5 Sunshine (Moonlight 60fps)'
+        if: inputs.stream == 'yes'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          try {
+            winget install --exact --id LizardByte.Sunshine --disable-interactivity --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
+          } catch { Write-Output "[WARN] Sunshine install fail" }
+          $sp = 'C:\Program Files\Sunshine\sunshine.exe'
+          if (Test-Path $sp) {
+            $spw = -join ((48..57) + (97..122) | Get-Random -Count 10 | ForEach-Object { [char]$_ })
+            Add-Content -Path $env:GITHUB_ENV -Value "SUNPW=$spw"
+            try { & $sp --creds sunshine $spw 2>&1 | Out-Null } catch { Write-Output "[WARN] creds set fail" }
+            foreach ($pt in '47990','47989','48010') { netsh advfirewall firewall add rule name="SunT$pt" dir=in action=allow protocol=TCP localport=$pt | Out-Null }
+            foreach ($pt in '47998','47999','48000','48002','48010') { netsh advfirewall firewall add rule name="SunU$pt" dir=in action=allow protocol=UDP localport=$pt | Out-Null }
+            Start-Process $sp -WindowStyle Hidden
+            Start-Sleep -Seconds 10
+            if (Get-Process sunshine -ErrorAction SilentlyContinue) { Write-Output "[OK] Sunshine chal gaya" } else { Write-Output "[WARN] Sunshine process nahi mila" }
+          } else { Write-Output "[WARN] Sunshine nahi mila" }
+
+      - name: '6 Web backup'
+        if: inputs.web == 'yes'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          try { winget install --exact --id GlavSoft.TightVNC --silent --disable-interactivity --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null } catch { Write-Output "[WARN] TightVNC install fail" }
+          Start-Sleep -Seconds 6
+          $v = 'C:\Program Files\TightVNC\tvnserver.exe'
+          if (Test-Path $v) { Start-Process $v -ArgumentList '-run' -WindowStyle Hidden; Write-Output "[OK] TightVNC :5900" } else { Write-Output "[WARN] TightVNC nahi mila" }
+          try {
+            python -m pip install --quiet websockify 2>&1 | Out-Null
+            Invoke-WebRequest -Uri 'https://github.com/novnc/noVNC/archive/refs/heads/master.zip' -OutFile "$env:TEMP\novnc.zip" -UseBasicParsing -TimeoutSec 180
+            Expand-Archive -Path "$env:TEMP\novnc.zip" -DestinationPath "$env:TEMP" -Force
+            $nv = Get-ChildItem "$env:TEMP\noVNC-*" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($nv) { Start-Process python -ArgumentList '-m','websockify','--web',$nv.FullName,'6080','localhost:5900' -WindowStyle Hidden; Write-Output "[OK] noVNC :6080" }
+          } catch { Write-Output "[WARN] noVNC setup fail" }
+          try {
+            Invoke-WebRequest -Uri 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe' -OutFile "$env:TEMP\cf.exe" -UseBasicParsing -TimeoutSec 180
+            Start-Process "$env:TEMP\cf.exe" -ArgumentList 'tunnel','--url','http://127.0.0.1:6080','--no-autoupdate' -RedirectStandardOutput "$env:TEMP\cf_out.txt" -RedirectStandardError "$env:TEMP\cf_err.txt" -WindowStyle Hidden
+            $link = ''
+            for ($i = 0; $i -lt 15; $i++) {
+              Start-Sleep -Seconds 4
+              $m = Get-Content "$env:TEMP\cf_out.txt","$env:TEMP\cf_err.txt" -ErrorAction SilentlyContinue | Select-String -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com' | Select-Object -First 1
+              if ($m) { $link = $m.Matches[0].Value; break }
+            }
+            if ($link) { Add-Content -Path $env:GITHUB_ENV -Value "CF_LINK=$link"; Write-Output "[OK] browser link mil gaya" } else { Write-Output "[WARN] tunnel nahi bana" }
+          } catch { Write-Output "[WARN] cloudflared fail" }
+
+      - name: '7 Health check'
+        shell: pwsh
+        run: |
+          Write-Output "=============================================="
+          Write-Output "  WINDOWS CLOUD PC TAIYAR HAI"
+          Write-Output "=============================================="
+          if ($env:TS_IP) {
+            Write-Output "  == 1) RDP - Windows App (sabse best) =="
+            Write-Output "  PC name : $env:TS_IP"
+            Write-Output "  User    : RDP"
+            Write-Output "  Pass    : $env:RDPPW"
+            Write-Output "  --------------------------------------"
+            Write-Output "  == 2) MOONLIGHT - 60fps smooth =="
+            Write-Output "  Address : $env:TS_IP"
+            Write-Output "  Web UI  : https://$env:TS_IP`:47990"
+            Write-Output "  Login   : sunshine  /  $env:SUNPW"
+          } else {
+            Write-Output "  Tailscale nahi chala - sirf browser link chalega"
+          }
+          if ($env:CF_LINK) {
+            Write-Output "  --------------------------------------"
+            Write-Output "  == 3) BROWSER (backup / kisi ko dikhao) =="
+            Write-Output "  $env:CF_LINK/vnc.html?autoconnect=true&resize=scale"
+          }
+          Write-Output "  --------------------------------------"
+          Write-Output "  TIME    : ${{ inputs.hours }} ghante"
+          Write-Output "=============================================="
+          $svc = Get-Service -Name TermService -ErrorAction SilentlyContinue
+          if ($svc) { Write-Output "[OK] TermService = $($svc.Status)" }
+          if (Get-LocalUser -Name RDP -ErrorAction SilentlyContinue) { Write-Output "[OK] user RDP maujood hai" }
+          if (Get-Process sunshine -ErrorAction SilentlyContinue) { Write-Output "[OK] Sunshine chal raha hai" }
+          if (Get-Process tvnserver -ErrorAction SilentlyContinue) { Write-Output "[OK] TightVNC chal raha hai" }
+
+      - name: '8 Keep alive'
+        shell: pwsh
+        run: |
+          $h = [int]'${{ inputs.hours }}'
+          $end = (Get-Date).AddHours($h)
+          $sun = 'C:\Program Files\Sunshine\sunshine.exe'
+          Write-Output "[OK] $h ghante chalega"
+          while ((Get-Date) -lt $end) {
+            Start-Sleep -Seconds 300
+            if ((Test-Path $sun) -and -not (Get-Process sunshine -ErrorAction SilentlyContinue)) {
+              Start-Process $sun -WindowStyle Hidden
+              Write-Output "[fix] Sunshine dobara start kiya"
+            }
+            $left = $end - (Get-Date)
+            Write-Output "[alive] bache $([math]::Round($left.TotalMinutes)) min | $(Get-Date -Format 'HH:mm:ss')"
+          }
+          Write-Output "TIME OVER"

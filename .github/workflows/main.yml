@@ -18,8 +18,8 @@ jobs:
       - name: 1 - RDP On + User Banao
         shell: pwsh
         run: |
-          $pass = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 12 | ForEach-Object { [char]$_ })
-          "RDP_PASS=$pass" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $pass = (-join ((48..57) + (65..90) + (97..122) | Get-Random -Count 12 | ForEach-Object { [char]$_ })) + "Aa1"
+          "RDP_PASS=$pass" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           net user RDP $pass /add 2>$null | Out-Null
           net user RDP $pass 2>$null | Out-Null
           net localgroup administrators RDP /add 2>$null | Out-Null
@@ -30,44 +30,128 @@ jobs:
           Start-Service TermService
           Write-Host "[OK] RDP ON ho gaya"
 
-      - name: 2 - Tailscale Connect Karo
+      - name: 2 - Tailscale Try Karo (fail hua to noVNC mode)
         shell: pwsh
         env:
           TS_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
-          if (-not $env:TS_KEY) { Write-Host "[ERROR] TAILSCALE_AUTH_KEY secret nahi mila! Repo Settings > Secrets me daalo."; exit 1 }
-          winget install --id Tailscale.Tailscale -e --silent --accept-package-agreements --accept-source-agreements | Out-Null
-          & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=$env:TS_KEY --hostname=windows-rdp --unattended
+          $ip = $null
+          $ts = "C:\Program Files\Tailscale\tailscale.exe"
+          if (-not $env:TS_KEY) {
+            Write-Host "[INFO] TAILSCALE_AUTH_KEY secret nahi mila -> noVNC mode"
+          } else {
+            try {
+              if (-not (Test-Path $ts)) { choco install tailscale -y --no-progress | Out-Null }
+              if (-not (Test-Path $ts)) { winget install --id Tailscale.Tailscale -e --silent --accept-package-agreements --accept-source-agreements | Out-Null }
+              & $ts up --authkey=$env:TS_KEY --hostname=windows-rdp --unattended
+              if ($LASTEXITCODE -ne 0) { throw "tailscale up fail hua" }
+              for ($i = 0; $i -lt 20 -and -not $ip; $i++) {
+                Start-Sleep -Seconds 3
+                $ip = (& $ts ip -4 2>$null | Select-Object -First 1)
+              }
+            } catch {
+              Write-Host "[WARN] Tailscale fail: $_"
+              $ip = $null
+            }
+          }
+          if ($ip) {
+            "MODE=tailscale" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "TS_IP=$ip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "[OK] Tailscale IP: $ip"
+          } else {
+            "MODE=vnc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "[INFO] Tailscale nahi chala -> noVNC browser link banega"
+          }
+
+      - name: 3 - noVNC Browser Link Banao
+        if: env.MODE == 'vnc'
+        shell: pwsh
+        run: |
+          # VNC password max 8 characters hota hai
+          $vncPass = -join ((48..57) + (97..122) | Get-Random -Count 8 | ForEach-Object { [char]$_ })
+          "VNC_PASS=$vncPass" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          # 1) TightVNC server (port 5900)
+          $msiArgs = "SET_USEVNCAUTHENTICATION=1 VALUE_OF_USEVNCAUTHENTICATION=1 SET_PASSWORD=1 VALUE_OF_PASSWORD=$vncPass SET_USECONTROLAUTHENTICATION=1 VALUE_OF_USECONTROLAUTHENTICATION=1 SET_CONTROLPASSWORD=1 VALUE_OF_CONTROLPASSWORD=$vncPass"
+          choco install tightvnc -y --no-progress --install-arguments="'$msiArgs'" | Out-Null
           Start-Sleep -Seconds 5
-          $ip = & "C:\Program Files\Tailscale\tailscale.exe" ip -4
-          "TS_IP=$ip" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "[OK] Tailscale IP: $ip"
+          Restart-Service tvnserver -ErrorAction SilentlyContinue
+          $up = $false
+          for ($i = 0; $i -lt 20 -and -not $up; $i++) {
+            Start-Sleep -Seconds 3
+            $up = [bool](Get-NetTCPConnection -LocalPort 5900 -State Listen -ErrorAction SilentlyContinue)
+          }
+          if (-not $up) { throw "TightVNC port 5900 pe nahi chala" }
+          Write-Host "[OK] VNC server chal gaya"
 
-      - name: 3 - Connect Info
+          # 2) noVNC + websockify (port 6080)
+          git clone -q --depth 1 https://github.com/novnc/noVNC.git "$env:RUNNER_TEMP\noVNC"
+          python -m pip install --quiet websockify
+          Start-Process python -ArgumentList "-m","websockify","--web","$env:RUNNER_TEMP\noVNC","6080","127.0.0.1:5900" -WindowStyle Hidden
+          Start-Sleep -Seconds 4
+
+          # 3) Cloudflare quick tunnel (free, account nahi chahiye)
+          $cf  = "$env:RUNNER_TEMP\cloudflared.exe"
+          $log = "$env:RUNNER_TEMP\cf.log"
+          Invoke-WebRequest "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile $cf
+          Start-Process $cf -ArgumentList "tunnel","--url","http://127.0.0.1:6080","--no-autoupdate" -RedirectStandardError $log -RedirectStandardOutput "$env:RUNNER_TEMP\cf.out" -WindowStyle Hidden
+          $url = $null
+          for ($i = 0; $i -lt 40 -and -not $url; $i++) {
+            Start-Sleep -Seconds 3
+            $txt = Get-Content $log -Raw -ErrorAction SilentlyContinue
+            if ($txt -match 'https://[a-z0-9-]+\.trycloudflare\.com') { $url = $Matches[0] }
+          }
+          if (-not $url) {
+            if (Test-Path $log) { Get-Content $log }
+            throw "Cloudflare tunnel link nahi bana"
+          }
+          "NOVNC_URL=$url/vnc.html?autoconnect=true&resize=scale&password=$vncPass" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "[OK] noVNC link ready"
+
+      - name: 4 - Connect Info
         shell: pwsh
         run: |
-          $info = @"
-          ## Windows RDP Ready
-          | Cheez | Value |
-          |---|---|
-          | **IP (Windows App me dalna)** | ``$env:TS_IP`:3389`` |
-          | **Username** | ``RDP`` |
-          | **Password** | ``$env:RDP_PASS`` |
-          > Phone/PC pe **Windows App** kholo > + > PC > upar wala IP dalo > RDP user se login karo.
-          "@
-          $info | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          Write-Host "=================================="
-          Write-Host "IP       : $env:TS_IP`:3389"
-          Write-Host "Username : RDP"
-          Write-Host "Password : $env:RDP_PASS"
-          Write-Host "=================================="
+          $b = [char]96
+          $L = @("## Windows PC Ready", "")
+          if ($env:MODE -eq "tailscale") {
+            $L += "**Mode: Tailscale + RDP**"
+            $L += ""
+            $L += "| Cheez | Value |"
+            $L += "|---|---|"
+            $L += "| **IP (Windows App me dalna)** | $b${env:TS_IP}:3389$b |"
+            $L += "| **Username** | ${b}RDP${b} |"
+            $L += "| **Password** | $b${env:RDP_PASS}$b |"
+            $L += ""
+            $L += "> Windows App kholo > + > PC > IP dalo > RDP user se login karo."
+            Write-Host "=================================="
+            Write-Host "MODE     : Tailscale + RDP"
+            Write-Host "IP       : ${env:TS_IP}:3389"
+            Write-Host "Username : RDP"
+            Write-Host "Password : ${env:RDP_PASS}"
+            Write-Host "=================================="
+          } else {
+            $L += "**Mode: Browser (noVNC)**"
+            $L += ""
+            $L += "### [Yaha tap karke PC kholo]($env:NOVNC_URL)"
+            $L += ""
+            $L += "VNC password: $b${env:VNC_PASS}$b (link me already daala hai, auto-connect hoga)"
+            $L += ""
+            $L += "> Is mode me login nahi hota, seedha runner ka desktop khulta hai."
+            Write-Host "=================================="
+            Write-Host "MODE : Browser (noVNC)"
+            Write-Host "LINK : ${env:NOVNC_URL}"
+            Write-Host "VNC password: ${env:VNC_PASS}"
+            Write-Host "=================================="
+          }
+          $L -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
-      - name: 4 - PC Zinda Rakho
+      - name: 5 - PC Zinda Rakho
         shell: pwsh
         run: |
-          $total = [int]"${{ inputs.hours }}" * 60
+          $total = [Math]::Min([int]"${{ inputs.hours }}" * 60, 345)
           for ($i = 1; $i -le $total; $i++) {
             Write-Host "PC chal raha hai... $i / $total minute"
+            if ($env:MODE -eq "vnc" -and $i % 10 -eq 0) { Write-Host "LINK: $env:NOVNC_URL" }
             Start-Sleep -Seconds 60
           }
           Write-Host "Time Khatam. PC band ho raha hai."

@@ -1,4 +1,4 @@
-name: Windows RDP
+name: Windows VNC
 
 on:
   workflow_dispatch:
@@ -15,72 +15,36 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 360
     steps:
-      - name: 1 - RDP On + User Banao
+      - name: 1 - TightVNC Install
         shell: pwsh
         run: |
-          $pass = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 12 | ForEach-Object { [char]$_ })
-          "RDP_PASS=$pass" | Out-File -FilePath $env:GITHUB_ENV -Append
-          net user RDP $pass /add 2>$null | Out-Null
-          net user RDP $pass 2>$null | Out-Null
-          net localgroup administrators RDP /add 2>$null | Out-Null
-          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name fDenyTSConnections -Value 0
-          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name UserAuthentication -Value 0
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop" 2>$null | Out-Null
-          Set-Service TermService -StartupType Automatic
-          Start-Service TermService
-          Write-Host "[OK] RDP ON ho gaya"
-
-      - name: 2 - Mode Decide
-        shell: pwsh
-        env:
-          TS_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
-        run: |
-          if ($env:TS_KEY) {
-            "MODE=tailscale" | Out-File -FilePath $env:GITHUB_ENV -Append
-            Write-Host "[MODE] Tailscale mode"
-          } else {
-            "MODE=vnc" | Out-File -FilePath $env:GITHUB_ENV -Append
-            Write-Host "[MODE] noVNC mode"
-          }
-
-      - name: 3a - Tailscale Connect
-        if: env.MODE == 'tailscale'
-        shell: pwsh
-        env:
-          TS_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
-        run: |
-          winget install --id Tailscale.Tailscale -e --silent --accept-package-agreements --accept-source-agreements | Out-Null
-          & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=$env:TS_KEY --hostname=windows-rdp --unattended
-          Start-Sleep -Seconds 5
-          $ip = & "C:\Program Files\Tailscale\tailscale.exe" ip -4
-          "TS_IP=$ip" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "[OK] Tailscale IP: $ip"
-
-      - name: 3b - noVNC + Cloudflare Tunnel
-        if: env.MODE == 'vnc'
-        shell: pwsh
-        run: |
+          $ErrorActionPreference = "Continue"
           $vncPass = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 8 | ForEach-Object { [char]$_ })
           "VNC_PASS=$vncPass" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-          # 1. TightVNC install
-          choco install tightvnc -y --no-progress --install-arguments="SET_USEVNCAUTHENTICATION=1 VALUE_OF_USEVNCAUTHENTICATION=1 SET_PASSWORD=1 VALUE_OF_PASSWORD=$vncPass SET_LOOPBACKONLY=1 VALUE_OF_LOOPBACKONLY=1" | Out-Null
+          choco install tightvnc -y --no-progress --install-arguments="SET_USEVNCAUTHENTICATION=1 VALUE_OF_USEVNCAUTHENTICATION=1 SET_PASSWORD=1 VALUE_OF_PASSWORD=$vncPass SET_LOOPBACKONLY=1 VALUE_OF_LOOPBACKONLY=1"
           Start-Sleep -Seconds 8
           Start-Service tvnserver -ErrorAction SilentlyContinue
           $svc = Get-Service -Name tvnserver -ErrorAction SilentlyContinue
           Write-Host "[INFO] tvnserver: $($svc.Status)"
 
-          # 2. noVNC files
+      - name: 2 - noVNC + websockify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
           Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "$env:RUNNER_TEMP\novnc.zip"
           Expand-Archive "$env:RUNNER_TEMP\novnc.zip" -DestinationPath "C:\" -Force
           $novncDir = "C:\noVNC-master"
 
-          # 3. websockify
           python -m pip install websockify | Out-Null
           Start-Process -FilePath "python" -ArgumentList "-m", "websockify", "--web", $novncDir, "6080", "localhost:5900" -WindowStyle Hidden -RedirectStandardOutput "C:\websockify.log" -RedirectStandardError "C:\websockify.err.log"
           Start-Sleep -Seconds 5
+          Write-Host "[INFO] websockify port 6080 open: $(Test-NetConnection -ComputerName localhost -Port 6080 -InformationLevel Quiet)"
 
-          # 4. Cloudflare quick tunnel
+      - name: 3 - Cloudflare Tunnel
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
           Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "C:\cloudflared.exe"
           Start-Process -FilePath "C:\cloudflared.exe" -ArgumentList "tunnel", "--url", "http://localhost:6080" -WindowStyle Hidden -RedirectStandardOutput "C:\cf.out.log" -RedirectStandardError "C:\cf.log"
 
@@ -92,12 +56,14 @@ jobs:
               if ($m) { $url = $m.Matches[0].Value }
             }
           }
+
           if ($url) {
             "VNC_URL=$url" | Out-File -FilePath $env:GITHUB_ENV -Append
             Write-Host "[OK] Tunnel URL: $url"
           } else {
-            Write-Host "[ERROR] Tunnel URL nahi mila"
+            Write-Host "[ERROR] Tunnel URL nahi mila. cf.log:"
             if (Test-Path "C:\cf.log") { Get-Content "C:\cf.log" -Tail 30 }
+            Write-Host "websockify.err.log:"
             if (Test-Path "C:\websockify.err.log") { Get-Content "C:\websockify.err.log" -Tail 30 }
           }
 
@@ -106,30 +72,19 @@ jobs:
         shell: pwsh
         run: |
           $lines = @()
-          $lines += "## Windows Ready"
+          $lines += "## Windows VNC Ready"
           $lines += ""
-          if ($env:MODE -eq 'tailscale' -and $env:TS_IP) {
-            $lines += "**Mode: Tailscale (Windows App / RDP)**"
-            $lines += ""
-            $lines += "| Cheez | Value |"
-            $lines += "|---|---|"
-            $lines += "| IP | ``$($env:TS_IP):3389`` |"
-            $lines += "| Username | ``RDP`` |"
-            $lines += "| Password | ``$($env:RDP_PASS)`` |"
-          } elseif ($env:VNC_URL) {
-            $lines += "**Mode: Browser (noVNC)**"
-            $lines += ""
+          if ($env:VNC_URL) {
             $lines += "| Cheez | Value |"
             $lines += "|---|---|"
             $lines += "| VNC Password | ``$($env:VNC_PASS)`` |"
             $lines += ""
-            $lines += "> Neeche wala link browser me kholo, Connect dabao, VNC password daalo."
+            $lines += "> Link browser me kholo, Connect dabao, VNC password daalo."
             $lines += ""
             $lines += "**Link:** $($env:VNC_URL)/vnc.html?autoconnect=true"
           } else {
-            $lines += "**Link nahi bana. Step 3b ka log dekho.**"
+            $lines += "**Link nahi bana. Step 3 ka log dekho.**"
           }
-          $lines += ""
           $text = $lines -join "`n"
           $text | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           Write-Host $text

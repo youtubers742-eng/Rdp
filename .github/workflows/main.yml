@@ -40,7 +40,7 @@ jobs:
             Write-Host "[MODE] Tailscale key mili, Tailscale mode chalega"
           } else {
             "MODE=vnc" | Out-File -FilePath $env:GITHUB_ENV -Append
-            Write-Host "[MODE] Tailscale key nahi mili, noVNC (browser link) mode chalega"
+            Write-Host "[MODE] Tailscale key nahi mili, noVNC mode chalega"
           }
 
       - name: 3a - Tailscale Connect Karo
@@ -56,34 +56,46 @@ jobs:
           "TS_IP=$ip" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "[OK] Tailscale IP: $ip"
 
-      - name: 3b - noVNC + Cloudflare Tunnel (Tailscale nahi hai)
+      - name: 3b - noVNC + Cloudflare Tunnel
         if: env.MODE == 'vnc'
         shell: pwsh
         run: |
-          # VNC password sirf 8 characters tak chalta hai
+          $ErrorActionPreference = "Continue"
           $vncPass = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 8 | ForEach-Object { [char]$_ })
           "VNC_PASS=$vncPass" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-          # 1. TightVNC server install (sirf localhost pe sunega, password ke saath)
-          choco install tightvnc -y --no-progress --install-arguments="SET_USEVNCAUTHENTICATION=1 VALUE_OF_USEVNCAUTHENTICATION=1 SET_PASSWORD=1 VALUE_OF_PASSWORD=$vncPass SET_LOOPBACKONLY=1 VALUE_OF_LOOPBACKONLY=1" | Out-Null
+          # 1. TightVNC install (sirf localhost pe)
+          choco install tightvnc -y --no-progress --install-arguments="SET_USEVNCAUTHENTICATION=1 VALUE_OF_USEVNCAUTHENTICATION=1 SET_PASSWORD=1 VALUE_OF_PASSWORD=$vncPass SET_LOOPBACKONLY=1 VALUE_OF_LOOPBACKONLY=1"
           Start-Sleep -Seconds 5
+          $svc = Get-Service -Name tvnserver -ErrorAction SilentlyContinue
+          if (-not $svc) {
+            Write-Host "[WARN] tvnserver service nahi mili, dobara try"
+            $msi = Get-ChildItem "C:\ProgramData\chocolatey\lib\tightvnc" -Recurse -Filter *.msi -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($msi) {
+              Start-Process msiexec.exe -ArgumentList "/i `"$($msi.FullName)`" /qn SET_USEVNCAUTHENTICATION=1 VALUE_OF_USEVNCAUTHENTICATION=1 SET_PASSWORD=1 VALUE_OF_PASSWORD=$vncPass SET_LOOPBACKONLY=1 VALUE_OF_LOOPBACKONLY=1" -Wait
+              Start-Sleep -Seconds 5
+            }
+          }
           Start-Service tvnserver -ErrorAction SilentlyContinue
-          Write-Host "[OK] TightVNC server chal gaya"
+          $svc = Get-Service -Name tvnserver -ErrorAction SilentlyContinue
+          Write-Host "[INFO] tvnserver status: $($svc.Status)"
+          if (-not $svc -or $svc.Status -ne 'Running') { Write-Host "[ERROR] TightVNC nahi chala" }
 
-          # 2. noVNC web files download
+          # 2. noVNC files
           Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "$env:RUNNER_TEMP\novnc.zip"
           Expand-Archive "$env:RUNNER_TEMP\novnc.zip" -DestinationPath "C:\" -Force
           $novncDir = "C:\noVNC-master"
 
           # 3. websockify (browser WebSocket -> VNC bridge)
-          pip install websockify | Out-Null
-          Start-Process -FilePath "python" -ArgumentList "-m websockify --web $novncDir 6080 localhost:5900" -WindowStyle Hidden -RedirectStandardOutput "C:\websockify.log" -RedirectStandardError "C:\websockify.err.log"
-          Start-Sleep -Seconds 3
-          Write-Host "[OK] websockify port 6080 pe chal raha hai"
+          python -m pip install websockify | Out-Null
+          Start-Process -FilePath "python" -ArgumentList "-m", "websockify", "--web", $novncDir, "6080", "localhost:5900" -WindowStyle Hidden -RedirectStandardOutput "C:\websockify.log" -RedirectStandardError "C:\websockify.err.log"
+          Start-Sleep -Seconds 4
+          $wsOk = Test-NetConnection -ComputerName localhost -Port 6080 -InformationLevel Quiet
+          Write-Host "[INFO] websockify port 6080 open: $wsOk"
 
-          # 4. Cloudflare quick tunnel (public https link, free, no account)
+          # 4. Cloudflare quick tunnel
           Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "C:\cloudflared.exe"
-          Start-Process -FilePath "C:\cloudflared.exe" -ArgumentList "tunnel --url http://localhost:6080" -WindowStyle Hidden -RedirectStandardError "C:\cf.log"
+          Start-Process -FilePath "C:\cloudflared.exe" -ArgumentList "tunnel", "--url", "http://localhost:6080" -WindowStyle Hidden -RedirectStandardOutput "C:\cf.out.log" -RedirectStandardError "C:\cf.log"
 
           $url = $null
           for ($i = 0; $i -lt 60 -and -not $url; $i++) {
@@ -93,9 +105,15 @@ jobs:
               if ($m) { $url = $m.Matches[0].Value }
             }
           }
-          if (-not $url) { Write-Host "[ERROR] Cloudflare URL nahi mila"; exit 1 }
-          "VNC_URL=$url" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "[OK] Tunnel URL: $url"
+          if ($url) {
+            "VNC_URL=$url" | Out-File -FilePath $env:GITHUB_ENV -Append
+            Write-Host "[OK] Tunnel URL: $url"
+          } else {
+            Write-Host "[ERROR] Cloudflare URL nahi mila. cf.log:"
+            if (Test-Path "C:\cf.log") { Get-Content "C:\cf.log" }
+            Write-Host "websockify.err.log:"
+            if (Test-Path "C:\websockify.err.log") { Get-Content "C:\websockify.err.log" }
+          }
 
       - name: 4 - Connect Info
         if: always()
@@ -112,12 +130,10 @@ jobs:
             $summary += "| IP (Windows App me dalna) | ``$($env:TS_IP):3389`` |"
             $summary += "| Username | ``RDP`` |"
             $summary += "| Password | ``$($env:RDP_PASS)`` |"
-            $summary += ""
-            $summary += "> Windows App kholo > + > PC > upar wala IP dalo > RDP user se login karo."
             Write-Host "IP       : $($env:TS_IP):3389"
             Write-Host "Username : RDP"
             Write-Host "Password : $($env:RDP_PASS)"
-          } else {
+          } elseif ($env:VNC_URL) {
             $summary += "**Mode: Browser (noVNC)**"
             $summary += ""
             $summary += "| Cheez | Value |"
@@ -128,10 +144,13 @@ jobs:
             $summary += "> Link browser me kholo, Connect dabao, VNC password daalo."
             Write-Host "Link     : $($env:VNC_URL)/vnc.html?autoconnect=true"
             Write-Host "Password : $($env:VNC_PASS)"
+          } else {
+            $summary += "**Link nahi bana. Step 3b ka log dekho.**"
           }
           $summary -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
 
       - name: 5 - PC Zinda Rakho
+        if: always()
         shell: pwsh
         run: |
           $total = [int]"${{ inputs.hours }}" * 60

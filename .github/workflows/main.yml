@@ -81,58 +81,101 @@ jobs:
             exit 1
           }
 
-      - name: 3 - Cloudflare Tunnel
+      - name: 3 - Tunnels (Cloudflare + localhost.run)
         shell: pwsh
         run: |
           $ErrorActionPreference = "Continue"
           Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "C:\cloudflared.exe"
 
-          $url = $null
-          for ($try = 1; $try -le 3 -and -not $url; $try++) {
-            Write-Host "[INFO] Tunnel try $try"
+          function Test-Live($u) {
+            for ($j = 0; $j -lt 15; $j++) {
+              Start-Sleep -Seconds 3
+              try {
+                $r = Invoke-WebRequest "$u/vnc.html" -UseBasicParsing -TimeoutSec 10
+                if ($r.StatusCode -eq 200) { return $true }
+              } catch { }
+            }
+            return $false
+          }
+
+          function Start-Cf($proto) {
             Remove-Item "C:\cf.log" -ErrorAction SilentlyContinue
-            $p = Start-Process -FilePath "C:\cloudflared.exe" -ArgumentList "tunnel", "--no-autoupdate", "--protocol", "http2", "--url", "http://127.0.0.1:6080" -WindowStyle Hidden -PassThru -RedirectStandardOutput "C:\cf.out.log" -RedirectStandardError "C:\cf.log"
-            for ($i = 0; $i -lt 30 -and -not $url; $i++) {
+            $p = Start-Process -FilePath "C:\cloudflared.exe" -ArgumentList "tunnel", "--no-autoupdate", "--protocol", $proto, "--url", "http://127.0.0.1:6080" -WindowStyle Hidden -PassThru -RedirectStandardOutput "C:\cf.out.log" -RedirectStandardError "C:\cf.log"
+            $url = $null
+            $reg = $false
+            for ($i = 0; $i -lt 30; $i++) {
               Start-Sleep -Seconds 2
               if (Test-Path "C:\cf.log") {
-                $m = Select-String -Path "C:\cf.log" -Pattern "https://(?!api\.)[a-z0-9-]+\.trycloudflare\.com" | Select-Object -First 1
-                if ($m) { $url = $m.Matches[0].Value }
+                if (-not $url) {
+                  $m = Select-String -Path "C:\cf.log" -Pattern "https://(?!api\.)[a-z0-9-]+\.trycloudflare\.com" -ErrorAction SilentlyContinue | Select-Object -First 1
+                  if ($m) { $url = $m.Matches[0].Value }
+                }
+                if (-not $reg) {
+                  if (Select-String -Path "C:\cf.log" -Pattern "Registered tunnel connection" -Quiet -ErrorAction SilentlyContinue) { $reg = $true }
+                }
+              }
+              if ($url -and $reg) { break }
+            }
+            if ($url -and $reg) {
+              if (Test-Live $url) { return $url }
+            }
+            Write-Host "[WARN] Cloudflare ($proto) fail hua. log:"
+            if (Test-Path "C:\cf.log") { Get-Content "C:\cf.log" -Tail 8 | Out-Host }
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            return $null
+          }
+
+          function Start-Lhr {
+            Remove-Item "C:\lhr.out.log", "C:\lhr.err.log" -ErrorAction SilentlyContinue
+            $p = Start-Process -FilePath "ssh" -ArgumentList "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL", "-o", "ServerAliveInterval=30", "-o", "ExitOnForwardFailure=yes", "-R", "80:127.0.0.1:6080", "nokey@localhost.run" -WindowStyle Hidden -PassThru -RedirectStandardOutput "C:\lhr.out.log" -RedirectStandardError "C:\lhr.err.log"
+            $url = $null
+            for ($i = 0; $i -lt 20 -and -not $url; $i++) {
+              Start-Sleep -Seconds 2
+              foreach ($f in @("C:\lhr.out.log", "C:\lhr.err.log")) {
+                if (-not $url -and (Test-Path $f)) {
+                  $m = Select-String -Path $f -Pattern "https://[a-z0-9]+\.lhr\.life" -ErrorAction SilentlyContinue | Select-Object -First 1
+                  if ($m) { $url = $m.Matches[0].Value }
+                }
               }
             }
-            if (-not $url) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+            if ($url) { return $url }
+            Write-Host "[WARN] localhost.run link nahi mila"
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            return $null
           }
 
-          if (-not $url) {
-            Write-Host "[ERROR] Tunnel URL nahi mila. cf.log:"
-            if (Test-Path "C:\cf.log") { Get-Content "C:\cf.log" -Tail 30 }
-            exit 1
+          $cf = $null
+          foreach ($proto in @("http2", "quic", "http2")) {
+            if (-not $cf) { $cf = Start-Cf $proto }
           }
+          $lhr = Start-Lhr
+          if ($lhr) { Write-Host "[INFO] localhost.run live: $(Test-Live $lhr)" }
 
-          $live = $false
-          for ($i = 0; $i -lt 30 -and -not $live; $i++) {
-            Start-Sleep -Seconds 3
-            try {
-              $r = Invoke-WebRequest "$url/vnc.html" -UseBasicParsing -TimeoutSec 10
-              if ($r.StatusCode -eq 200) { $live = $true }
-            } catch { }
+          if (-not $cf -and -not $lhr) { Write-Host "[ERROR] Koi bhi tunnel nahi bana"; exit 1 }
+
+          $pw = $env:VNC_PASS
+          if ($cf) {
+            $l = "$cf/vnc.html?autoconnect=true&resize=scale&password=$pw"
+            "CF_LINK=$l" | Out-File -FilePath $env:GITHUB_ENV -Append
+            Write-Host "[OK] CLOUDFLARE LINK: $l"
           }
-          Write-Host "[INFO] Public link live: $live"
-
-          $link = "$url/vnc.html?autoconnect=true&resize=scale&password=$($env:VNC_PASS)"
-          "VNC_LINK=$link" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "[OK] LINK: $link"
+          if ($lhr) {
+            $l = "$lhr/vnc.html?autoconnect=true&resize=scale&password=$pw"
+            "LHR_LINK=$l" | Out-File -FilePath $env:GITHUB_ENV -Append
+            Write-Host "[OK] LOCALHOST.RUN LINK: $l"
+          }
 
       - name: 4 - Connect Info
         if: always()
         shell: pwsh
         run: |
           $lines = @("## Windows VNC", "")
-          if ($env:VNC_LINK) {
-            $lines += "VNC Password: ``$($env:VNC_PASS)``"
+          if ($env:CF_LINK -or $env:LHR_LINK) {
+            $lines += "VNC Password: ``$($env:VNC_PASS)`` (links me already laga hai)"
             $lines += ""
-            $lines += "Link browser me kholo (password link me already laga hai):"
-            $lines += ""
-            $lines += $env:VNC_LINK
+            if ($env:CF_LINK) { $lines += "**Link 1 (Cloudflare):**"; $lines += ""; $lines += $env:CF_LINK; $lines += "" }
+            if ($env:LHR_LINK) { $lines += "**Link 2 (localhost.run):**"; $lines += ""; $lines += $env:LHR_LINK; $lines += "" }
+            $lines += "Ek link na khule to doosra try karo."
           } else {
             $lines += "Link nahi bana. Upar ke steps me [ERROR] line dekho."
           }
@@ -141,23 +184,55 @@ jobs:
           Write-Host $text
 
       - name: 5 - PC Zinda Rakho
-        if: env.VNC_LINK != ''
+        if: env.CF_LINK != '' || env.LHR_LINK != ''
         shell: pwsh
         run: |
           function Test-Port($port) {
             try { $c = New-Object Net.Sockets.TcpClient; $c.Connect("127.0.0.1", $port); $c.Close(); return $true } catch { return $false }
+          }
+          function Find-Url($file, $pattern) {
+            if (Test-Path $file) {
+              $m = Select-String -Path $file -Pattern $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($m) { return $m.Matches[0].Value }
+            }
+            return $null
           }
           $end = (Get-Date).AddMinutes([int]"${{ inputs.hours }}" * 60)
           $n = 0
           while ((Get-Date) -lt $end) {
             Start-Sleep -Seconds 60
             $n++
+
             if ((Get-Service tvnserver).Status -ne 'Running') { Start-Service tvnserver }
+
             if (-not (Test-Port 6080)) {
               Write-Host "[WARN] websockify band tha, dobara chala raha hu"
               Start-Process -FilePath "python" -ArgumentList "-m", "websockify", "--web", $env:NOVNC_DIR, "127.0.0.1:6080", "127.0.0.1:5900" -WindowStyle Hidden
             }
+
+            if ($env:CF_LINK -and -not (Get-Process cloudflared -ErrorAction SilentlyContinue)) {
+              Write-Host "[WARN] cloudflared band ho gaya, restart"
+              Remove-Item "C:\cf.log" -ErrorAction SilentlyContinue
+              Start-Process -FilePath "C:\cloudflared.exe" -ArgumentList "tunnel", "--no-autoupdate", "--protocol", "http2", "--url", "http://127.0.0.1:6080" -WindowStyle Hidden -RedirectStandardOutput "C:\cf.out.log" -RedirectStandardError "C:\cf.log"
+              Start-Sleep -Seconds 25
+              $u = Find-Url "C:\cf.log" "https://(?!api\.)[a-z0-9-]+\.trycloudflare\.com"
+              if ($u) { Write-Host "[NAYA CLOUDFLARE LINK] $u/vnc.html?autoconnect=true&resize=scale&password=$($env:VNC_PASS)" }
+            }
+
+            if ($env:LHR_LINK -and -not (Get-Process ssh -ErrorAction SilentlyContinue)) {
+              Write-Host "[WARN] localhost.run band ho gaya, restart"
+              Remove-Item "C:\lhr.out.log", "C:\lhr.err.log" -ErrorAction SilentlyContinue
+              Start-Process -FilePath "ssh" -ArgumentList "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL", "-o", "ServerAliveInterval=30", "-R", "80:127.0.0.1:6080", "nokey@localhost.run" -WindowStyle Hidden -RedirectStandardOutput "C:\lhr.out.log" -RedirectStandardError "C:\lhr.err.log"
+              Start-Sleep -Seconds 15
+              $u = Find-Url "C:\lhr.out.log" "https://[a-z0-9]+\.lhr\.life"
+              if (-not $u) { $u = Find-Url "C:\lhr.err.log" "https://[a-z0-9]+\.lhr\.life" }
+              if ($u) { Write-Host "[NAYA LOCALHOST.RUN LINK] $u/vnc.html?autoconnect=true&resize=scale&password=$($env:VNC_PASS)" }
+            }
+
             Write-Host "PC chal raha hai... $n minute"
-            if ($n % 10 -eq 0) { Write-Host "LINK: $env:VNC_LINK" }
+            if ($n % 10 -eq 0) {
+              if ($env:CF_LINK) { Write-Host "LINK 1: $env:CF_LINK" }
+              if ($env:LHR_LINK) { Write-Host "LINK 2: $env:LHR_LINK" }
+            }
           }
           Write-Host "Time khatam. PC band ho raha hai."

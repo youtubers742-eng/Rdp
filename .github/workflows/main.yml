@@ -58,27 +58,92 @@ jobs:
           if ($ok) { Write-Host "[OK] VNC server chal raha hai aur connection accept kar raha hai" }
           else { Write-Host "[ERROR] VNC server connection accept nahi kar raha"; exit 1 }
 
-      - name: 2 - noVNC + websockify
+      - name: 2 - noVNC + websockify + Caddy
         shell: pwsh
         run: |
           $ErrorActionPreference = "Continue"
+
+          function Test-Ws($uri) {
+            for ($k = 0; $k -lt 3; $k++) {
+              try {
+                $ws = New-Object System.Net.WebSockets.ClientWebSocket
+                $ws.Options.AddSubProtocol("binary")
+                $cts = New-Object System.Threading.CancellationTokenSource 10000
+                $ws.ConnectAsync([Uri]$uri, $cts.Token).GetAwaiter().GetResult()
+                $buf = New-Object byte[] 64
+                $res = $ws.ReceiveAsync([ArraySegment[byte]]::new($buf), $cts.Token).GetAwaiter().GetResult()
+                $txt = [Text.Encoding]::ASCII.GetString($buf, 0, $res.Count)
+                $ws.Dispose()
+                if ($txt.StartsWith("RFB")) { return $true }
+              } catch { }
+              Start-Sleep -Seconds 2
+            }
+            return $false
+          }
+
+          # noVNC files
           Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/tags/v1.5.0.zip" -OutFile "$env:RUNNER_TEMP\novnc.zip"
           Expand-Archive "$env:RUNNER_TEMP\novnc.zip" -DestinationPath "C:\" -Force
-          $novncDir = "C:\noVNC-1.5.0"
-          if (-not (Test-Path "$novncDir\vnc.html")) { Write-Host "[ERROR] noVNC files nahi mile"; exit 1 }
-          "NOVNC_DIR=$novncDir" | Out-File -FilePath $env:GITHUB_ENV -Append
+          if (-not (Test-Path "C:\noVNC-1.5.0\vnc.html")) { Write-Host "[ERROR] noVNC files nahi mile"; exit 1 }
 
+          # websockify (sirf websocket ke liye, files serve nahi karega)
           python -m pip install --quiet websockify
-          Start-Process -FilePath "python" -ArgumentList "-m", "websockify", "--web", $novncDir, "127.0.0.1:6080", "127.0.0.1:5900" -WindowStyle Hidden -RedirectStandardOutput "C:\websockify.log" -RedirectStandardError "C:\websockify.err.log"
-          Start-Sleep -Seconds 5
+          Start-Process -FilePath "python" -ArgumentList "-m", "websockify", "127.0.0.1:6080", "127.0.0.1:5900" -WindowStyle Hidden -RedirectStandardOutput "C:\websockify.log" -RedirectStandardError "C:\websockify.err.log"
+
+          # Caddy (files tez serve karta hai + /websockify ko proxy karta hai)
+          Invoke-WebRequest -Uri "https://github.com/caddyserver/caddy/releases/download/v2.8.4/caddy_2.8.4_windows_amd64.zip" -OutFile "$env:RUNNER_TEMP\caddy.zip"
+          Expand-Archive "$env:RUNNER_TEMP\caddy.zip" -DestinationPath "C:\caddy" -Force
+          if (-not (Test-Path "C:\caddy\caddy.exe")) { Write-Host "[ERROR] caddy.exe nahi mila"; exit 1 }
+
+          $caddyfile = @(
+            "{",
+            "  admin off",
+            "  auto_https off",
+            "}",
+            ":8080 {",
+            "  handle /websockify* {",
+            "    reverse_proxy 127.0.0.1:6080",
+            "  }",
+            "  handle {",
+            "    root * C:/noVNC-1.5.0",
+            "    encode gzip",
+            "    @js path *.js *.mjs",
+            "    @css path *.css",
+            "    header @js Content-Type text/javascript",
+            "    header @css Content-Type text/css",
+            "    file_server",
+            "  }",
+            "}"
+          )
+          Set-Content -Path "C:\Caddyfile" -Value $caddyfile
+          Start-Process -FilePath "C:\caddy\caddy.exe" -ArgumentList "run", "--config", "C:\Caddyfile", "--adapter", "caddyfile" -WindowStyle Hidden -RedirectStandardOutput "C:\caddy.out.log" -RedirectStandardError "C:\caddy.err.log"
+
+          $ok = $false
+          for ($i = 0; $i -lt 15 -and -not $ok; $i++) {
+            Start-Sleep -Seconds 2
+            try {
+              $r = Invoke-WebRequest "http://127.0.0.1:8080/vnc.html" -UseBasicParsing -TimeoutSec 5
+              if ($r.StatusCode -eq 200) { $ok = $true }
+            } catch { }
+          }
+          if (-not $ok) {
+            Write-Host "[ERROR] noVNC page nahi khula. Caddy log:"
+            if (Test-Path "C:\caddy.err.log") { Get-Content "C:\caddy.err.log" -Tail 30 | Out-Host }
+            exit 1
+          }
+          Write-Host "[OK] noVNC page local pe khul gaya"
 
           try {
-            $r = Invoke-WebRequest "http://127.0.0.1:6080/vnc.html" -UseBasicParsing -TimeoutSec 10
-            Write-Host "[OK] noVNC local page status: $($r.StatusCode)"
-          } catch {
-            Write-Host "[ERROR] noVNC page nahi khula"
-            if (Test-Path "C:\websockify.err.log") { Get-Content "C:\websockify.err.log" -Tail 30 }
-            exit 1
+            $js = Invoke-WebRequest "http://127.0.0.1:8080/core/rfb.js" -UseBasicParsing -TimeoutSec 10
+            Write-Host "[INFO] rfb.js content-type: $($js.Headers['Content-Type'] -join ',')"
+          } catch { Write-Host "[WARN] rfb.js nahi khula" }
+
+          if (Test-Ws "ws://127.0.0.1:8080/websockify") {
+            Write-Host "[OK] noVNC -> websocket -> VNC poori chain chal rahi hai"
+          } else {
+            Write-Host "[WARN] websocket chain fail hui. Logs:"
+            if (Test-Path "C:\websockify.err.log") { Get-Content "C:\websockify.err.log" -Tail 20 | Out-Host }
+            if (Test-Path "C:\caddy.err.log") { Get-Content "C:\caddy.err.log" -Tail 20 | Out-Host }
           }
 
       - name: 3 - Tunnels (Cloudflare + localhost.run)
@@ -86,6 +151,24 @@ jobs:
         run: |
           $ErrorActionPreference = "Continue"
           Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "C:\cloudflared.exe"
+
+          function Test-Ws($uri) {
+            for ($k = 0; $k -lt 3; $k++) {
+              try {
+                $ws = New-Object System.Net.WebSockets.ClientWebSocket
+                $ws.Options.AddSubProtocol("binary")
+                $cts = New-Object System.Threading.CancellationTokenSource 10000
+                $ws.ConnectAsync([Uri]$uri, $cts.Token).GetAwaiter().GetResult()
+                $buf = New-Object byte[] 64
+                $res = $ws.ReceiveAsync([ArraySegment[byte]]::new($buf), $cts.Token).GetAwaiter().GetResult()
+                $txt = [Text.Encoding]::ASCII.GetString($buf, 0, $res.Count)
+                $ws.Dispose()
+                if ($txt.StartsWith("RFB")) { return $true }
+              } catch { }
+              Start-Sleep -Seconds 2
+            }
+            return $false
+          }
 
           function Test-Live($u) {
             for ($j = 0; $j -lt 15; $j++) {
@@ -100,7 +183,7 @@ jobs:
 
           function Start-Cf($proto) {
             Remove-Item "C:\cf.log" -ErrorAction SilentlyContinue
-            $p = Start-Process -FilePath "C:\cloudflared.exe" -ArgumentList "tunnel", "--no-autoupdate", "--protocol", $proto, "--url", "http://127.0.0.1:6080" -WindowStyle Hidden -PassThru -RedirectStandardOutput "C:\cf.out.log" -RedirectStandardError "C:\cf.log"
+            $p = Start-Process -FilePath "C:\cloudflared.exe" -ArgumentList "tunnel", "--no-autoupdate", "--protocol", $proto, "--url", "http://127.0.0.1:8080" -WindowStyle Hidden -PassThru -RedirectStandardOutput "C:\cf.out.log" -RedirectStandardError "C:\cf.log"
             $url = $null
             $reg = $false
             for ($i = 0; $i -lt 30; $i++) {
@@ -127,7 +210,7 @@ jobs:
 
           function Start-Lhr {
             Remove-Item "C:\lhr.out.log", "C:\lhr.err.log" -ErrorAction SilentlyContinue
-            $p = Start-Process -FilePath "ssh" -ArgumentList "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL", "-o", "ServerAliveInterval=30", "-o", "ExitOnForwardFailure=yes", "-R", "80:127.0.0.1:6080", "nokey@localhost.run" -WindowStyle Hidden -PassThru -RedirectStandardOutput "C:\lhr.out.log" -RedirectStandardError "C:\lhr.err.log"
+            $p = Start-Process -FilePath "ssh" -ArgumentList "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL", "-o", "ServerAliveInterval=30", "-o", "ExitOnForwardFailure=yes", "-R", "80:127.0.0.1:8080", "nokey@localhost.run" -WindowStyle Hidden -PassThru -RedirectStandardOutput "C:\lhr.out.log" -RedirectStandardError "C:\lhr.err.log"
             $url = $null
             for ($i = 0; $i -lt 20 -and -not $url; $i++) {
               Start-Sleep -Seconds 2
@@ -149,17 +232,21 @@ jobs:
             if (-not $cf) { $cf = Start-Cf $proto }
           }
           $lhr = Start-Lhr
-          if ($lhr) { Write-Host "[INFO] localhost.run live: $(Test-Live $lhr)" }
+          if ($lhr) { Write-Host "[INFO] localhost.run page live: $(Test-Live $lhr)" }
 
           if (-not $cf -and -not $lhr) { Write-Host "[ERROR] Koi bhi tunnel nahi bana"; exit 1 }
 
           $pw = $env:VNC_PASS
           if ($cf) {
+            $w = Test-Ws (($cf -replace '^https', 'wss') + "/websockify")
+            Write-Host "[INFO] Cloudflare websocket chal raha hai: $w"
             $l = "$cf/vnc.html?autoconnect=true&resize=scale&password=$pw"
             "CF_LINK=$l" | Out-File -FilePath $env:GITHUB_ENV -Append
             Write-Host "[OK] CLOUDFLARE LINK: $l"
           }
           if ($lhr) {
+            $w = Test-Ws (($lhr -replace '^https', 'wss') + "/websockify")
+            Write-Host "[INFO] localhost.run websocket chal raha hai: $w"
             $l = "$lhr/vnc.html?autoconnect=true&resize=scale&password=$pw"
             "LHR_LINK=$l" | Out-File -FilePath $env:GITHUB_ENV -Append
             Write-Host "[OK] LOCALHOST.RUN LINK: $l"
@@ -207,13 +294,17 @@ jobs:
 
             if (-not (Test-Port 6080)) {
               Write-Host "[WARN] websockify band tha, dobara chala raha hu"
-              Start-Process -FilePath "python" -ArgumentList "-m", "websockify", "--web", $env:NOVNC_DIR, "127.0.0.1:6080", "127.0.0.1:5900" -WindowStyle Hidden
+              Start-Process -FilePath "python" -ArgumentList "-m", "websockify", "127.0.0.1:6080", "127.0.0.1:5900" -WindowStyle Hidden
+            }
+            if (-not (Test-Port 8080)) {
+              Write-Host "[WARN] Caddy band tha, dobara chala raha hu"
+              Start-Process -FilePath "C:\caddy\caddy.exe" -ArgumentList "run", "--config", "C:\Caddyfile", "--adapter", "caddyfile" -WindowStyle Hidden
             }
 
             if ($env:CF_LINK -and -not (Get-Process cloudflared -ErrorAction SilentlyContinue)) {
               Write-Host "[WARN] cloudflared band ho gaya, restart"
               Remove-Item "C:\cf.log" -ErrorAction SilentlyContinue
-              Start-Process -FilePath "C:\cloudflared.exe" -ArgumentList "tunnel", "--no-autoupdate", "--protocol", "http2", "--url", "http://127.0.0.1:6080" -WindowStyle Hidden -RedirectStandardOutput "C:\cf.out.log" -RedirectStandardError "C:\cf.log"
+              Start-Process -FilePath "C:\cloudflared.exe" -ArgumentList "tunnel", "--no-autoupdate", "--protocol", "http2", "--url", "http://127.0.0.1:8080" -WindowStyle Hidden -RedirectStandardOutput "C:\cf.out.log" -RedirectStandardError "C:\cf.log"
               Start-Sleep -Seconds 25
               $u = Find-Url "C:\cf.log" "https://(?!api\.)[a-z0-9-]+\.trycloudflare\.com"
               if ($u) { Write-Host "[NAYA CLOUDFLARE LINK] $u/vnc.html?autoconnect=true&resize=scale&password=$($env:VNC_PASS)" }
@@ -222,7 +313,7 @@ jobs:
             if ($env:LHR_LINK -and -not (Get-Process ssh -ErrorAction SilentlyContinue)) {
               Write-Host "[WARN] localhost.run band ho gaya, restart"
               Remove-Item "C:\lhr.out.log", "C:\lhr.err.log" -ErrorAction SilentlyContinue
-              Start-Process -FilePath "ssh" -ArgumentList "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL", "-o", "ServerAliveInterval=30", "-R", "80:127.0.0.1:6080", "nokey@localhost.run" -WindowStyle Hidden -RedirectStandardOutput "C:\lhr.out.log" -RedirectStandardError "C:\lhr.err.log"
+              Start-Process -FilePath "ssh" -ArgumentList "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL", "-o", "ServerAliveInterval=30", "-R", "80:127.0.0.1:8080", "nokey@localhost.run" -WindowStyle Hidden -RedirectStandardOutput "C:\lhr.out.log" -RedirectStandardError "C:\lhr.err.log"
               Start-Sleep -Seconds 15
               $u = Find-Url "C:\lhr.out.log" "https://[a-z0-9]+\.lhr\.life"
               if (-not $u) { $u = Find-Url "C:\lhr.err.log" "https://[a-z0-9]+\.lhr\.life" }
